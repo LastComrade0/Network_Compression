@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 
-#define SERVER_IP "127.0.0.1"  
+#define SERVER_IP "192.168.132.210"  
 #define TCP_PORT_PRE_PROBE "7777"
 #define TCP_PORT_POST_PROBE "6666"
 #define UDP_SRC_PORT "9876"
@@ -25,6 +25,8 @@ int client_probing_tcp(const char *server_ip, const char *server_port){
     int tcp_socket;
     struct addrinfo hint, *res;
     int addr_info;
+    char msg[] = "Test send";
+    char buffer[1024];
     
     
     memset(&hint, 0, sizeof(hint));
@@ -52,6 +54,17 @@ int client_probing_tcp(const char *server_ip, const char *server_port){
         fprintf(stderr, "Connect error %s\n", gai_strerror(connector));
         exit(1);
     }
+
+    send(tcp_socket, msg, strlen(msg), 0);
+    
+    int bytes_recvd = recv(tcp_socket, buffer, sizeof(buffer) - 1, 0);
+
+    if(bytes_recvd > 0){
+        buffer[bytes_recvd] = '\0';
+        printf("Receiverd buffer: %s\n", buffer);
+        
+    }
+    //close(tcp_socket);
 
     freeaddrinfo(res);
     return tcp_socket;

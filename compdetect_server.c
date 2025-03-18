@@ -23,10 +23,12 @@
 
 volatile sig_atomic_t timeout_flag = 0;
 
-int server_probing_tcp(const char *server_port){
-    int tcp_socket;
+int server_pre_probing_tcp(const char *server_port){
+    int tcp_socket, new_fd;
     struct addrinfo hint, *res;
-    int addr_info;
+    int addr_info;//server_pro;
+    struct sockaddr_storage client_addr;
+    char buffer[1024];
     
     
     memset(&hint, 0, sizeof(hint)); //Fill hint addrinfo all 0
@@ -60,16 +62,45 @@ int server_probing_tcp(const char *server_port){
     }
 
     //Listen to client
-    int listener = listen(tcp_socket, 5);
+    int listener = listen(tcp_socket, 10);
 
     if(listener == -1){
         fprintf(stderr, "Listen error %s\n", gai_strerror(listener));
         exit(1);
     }
 
+    socklen_t addr_size = sizeof(client_addr);
+    new_fd = accept(tcp_socket, (struct sockaddr*)&client_addr, &addr_size);
+
+    if(new_fd== -1){
+        perror("accept error");
+        exit(1);
+    }
+    
+    int bytes_recvd = recv(new_fd, buffer, sizeof(buffer), 0);
+
+    if(bytes_recvd == -1){
+        perror("Receive error");
+        exit(1);
+    }
+
+    else if(bytes_recvd > 0){
+        printf("Byte received: %d\n", bytes_recvd);
+        buffer[bytes_recvd] = '\0';
+        printf("Received buffer: %s\n", buffer);
+
+        char response[1024];
+        strcpy(response, "OK");
+        send(new_fd, buffer, sizeof(response), 0);
+    }
+
+    close(new_fd);
+    //close(tcp_socket);
+
     //Free address info resolve
     freeaddrinfo(res);
-    return tcp_socket;
+    printf("Server accepted tcp: %d\n", tcp_socket);
+    //return tcp_socket;
 
 }
 
@@ -204,7 +235,7 @@ void clear_udp_buffer(int udp_socket, struct addrinfo *server_info){
     }
 }
 
-void post_probe(int client_socket_post_probe, long delta_t, char *result){
+void post_probe(int client_socket_post_probe, long delta_t, char *result){//const char *server_port
     printf("Delta t: %ld\n", delta_t);
     if(delta_t > COMPRESSION_THRESHOLD){
         strcpy(result, "Compression detected!");
@@ -221,10 +252,11 @@ void post_probe(int client_socket_post_probe, long delta_t, char *result){
 int main(int argc, char *argv[]){
 
     printf("Server Start\n");
+    printf("Waiting client connection: \n");
 
-    int tcp_socket = server_probing_tcp(TCP_PORT);
+    int tcp_socket_pre_probe = server_pre_probing_tcp(TCP_PORT);
 
-    int tcp_socket_post_probe = server_probing_tcp(TCP_PORT_POST_PROBE);
+    printf("TCP pre probe done");
 
     struct addrinfo *udp_res;
 
@@ -234,48 +266,47 @@ int main(int argc, char *argv[]){
 
     printf("Ready to receive UDP packets....\n");
 
-    while(1){
-        printf("Waiting client connection: ");
-        int client_socket = accept(tcp_socket, NULL, NULL);
-        if(client_socket == -1){
-            fprintf(stderr, "Client socket error %s\n", gai_strerror(client_socket));
-            exit(1);
-        }
-        close(client_socket);
+    
+    int client_socket = accept(tcp_socket_pre_probe, NULL, NULL);
+    if(client_socket == -1){
+        fprintf(stderr, "Client socket error %s\n", gai_strerror(client_socket));
+        exit(1);
+    }
+    close(client_socket);
         
-        //Low entropy UDP train
-        printf("Receiveing LOW Entropy UDP packet train\n");
-        long low_entropy = recv_udp_pkt(udp_socket);
+    //Low entropy UDP train
+    printf("Receiveing LOW Entropy UDP packet train\n");
+    long low_entropy = recv_udp_pkt(udp_socket);
 
-        printf("Low entropy time: %ld\n", low_entropy);
+    printf("Low entropy time: %ld\n", low_entropy);
 
-        clear_udp_buffer(udp_socket, udp_res);//Clear UDP socket buffer
+    clear_udp_buffer(udp_socket, udp_res);//Clear UDP socket buffer
 
-        //Wait
-        sleep(INTER_MEASUREMENT_TIME);
-        
-
-        //High entropy UDP train
-        printf("Receiveing High Entropy UDP packet train\n");
-        long high_entropy = recv_udp_pkt(udp_socket);
-
-        printf("High entropy time: %ld\n", high_entropy);
-
-        long delta_t = low_entropy - high_entropy;
-
-        int client_socket_post_probe = accept(tcp_socket_post_probe, NULL, NULL);
-        if(client_socket_post_probe == -1){
-            fprintf(stderr, "Client socket post probe error %s\n", gai_strerror(client_socket_post_probe));
-            exit(1);
-        }
-
-        post_probe(client_socket_post_probe, delta_t, result);
+    //Wait
+    sleep(INTER_MEASUREMENT_TIME);
         
 
+    //High entropy UDP train
+    printf("Receiveing High Entropy UDP packet train\n");
+    long high_entropy = recv_udp_pkt(udp_socket);
+
+    printf("High entropy time: %ld\n", high_entropy);
+
+    long delta_t = low_entropy - high_entropy;
+
+    int client_socket_post_probe = accept(tcp_socket_pre_probe, NULL, NULL); //change to tcp_socket_post_probe
+    if(client_socket_post_probe == -1){
+        fprintf(stderr, "Client socket post probe error %s\n", gai_strerror(client_socket_post_probe));
+        exit(1);
     }
 
-    close(tcp_socket);
-    close(tcp_socket_post_probe);
+    post_probe(client_socket_post_probe, delta_t, result);
+        
+
+    
+
+    close(tcp_socket_pre_probe);
+    close(client_socket_post_probe);
     close(udp_socket);
     freeaddrinfo(udp_res);
 
