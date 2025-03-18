@@ -24,12 +24,13 @@ int server_probing_tcp(const char *server_port){
     int addr_info;
     
     
-    memset(&hint, 0, sizeof(hint));
+    memset(&hint, 0, sizeof(hint)); //Fill hint addrinfo all 0
 
-    hint.ai_family = AF_INET;
-    hint.ai_socktype = SOCK_STREAM;
-    hint.ai_flags = AI_PASSIVE;
+    hint.ai_family = AF_INET; //Set IPv4
+    hint.ai_socktype = SOCK_STREAM; //Set TCP
+    hint.ai_flags = AI_PASSIVE; //On server to enable bind()/listen()/accept() on returned address
 
+    //Prepare server address info
     addr_info = getaddrinfo(NULL, server_port, &hint, &res);
 
     if(addr_info != 0){
@@ -37,6 +38,7 @@ int server_probing_tcp(const char *server_port){
         exit(1);
     }
 
+    //Set TCP socket
     tcp_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 
     if(tcp_socket == -1){
@@ -44,6 +46,7 @@ int server_probing_tcp(const char *server_port){
         exit(1);
     }
 
+    //Bind socket to this address
     int binder = bind(tcp_socket, res->ai_addr, res->ai_addrlen);
 
     if(binder == -1){
@@ -51,6 +54,7 @@ int server_probing_tcp(const char *server_port){
         exit(1);
     }
 
+    //Listen to client
     int listener = listen(tcp_socket, 5);
 
     if(listener == -1){
@@ -58,6 +62,7 @@ int server_probing_tcp(const char *server_port){
         exit(1);
     }
 
+    //Free address info resolve
     freeaddrinfo(res);
     return tcp_socket;
 
@@ -123,11 +128,6 @@ int recv_udp_pkt(int udp_socket){
     setsockopt(udp_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
     ssize_t first_udp_receive = recvfrom(udp_socket, buffer, PACKET_SIZE, 0, client_info->ai_addr, &addr_len);
-
-    // if(first_udp_receive < 0){
-    //     fprintf(stderr, "UDP Bind error %s\n", gai_strerror(first_udp_receive));
-    //     exit(1);
-    // }
     
     pkt_count += 1;
 
