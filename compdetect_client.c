@@ -18,7 +18,7 @@
 #define PACKET_SIZE 1000
 #define NUM_PACKETS 6000
 #define ID_EXTRACT sizeof(uint16_t)
-#define INTER_MEASUREMENT_TIME 30
+#define INTER_MEASUREMENT_TIME 60
 
 int client_probing_tcp(const char *server_ip, const char *server_port){
     printf("TCP pre probing\n");
@@ -112,7 +112,7 @@ int send_udp_pkt(int udp_socket, struct addrinfo *server_info, int entropy_type)
         case 0:
             memset(buffer, 0, PACKET_SIZE);
 
-            //printf("Sending low entropy train...\n");
+            printf("Sending low entropy train...\n");
             for(int i = 0; i < NUM_PACKETS; i += 1){
                 //printf("Sending packet id: %d\n", i);
                 packet_id = htons(i);
@@ -125,7 +125,7 @@ int send_udp_pkt(int udp_socket, struct addrinfo *server_info, int entropy_type)
 
         case 1:
 
-            //printf("Sending high entropy udp packet\n");
+            printf("Sending high entropy udp packet\n");
             
             int urandom_fd = open("/dev/urandom", O_RDONLY);
 
@@ -180,14 +180,13 @@ int main(int argc, char *argv[]){
     struct addrinfo *udp_res;
     int udp_socket = client_udp_probing(SERVER_IP, UDP_SRC_PORT, UDP_DEST_PORT, &udp_res);
 
-    send_udp_pkt(udp_socket, udp_res, 0);
+    send_udp_pkt(udp_socket, udp_res, 1);//Send Low entropy
 
     sleep(INTER_MEASUREMENT_TIME);
 
-    
-    send_udp_pkt(udp_socket, udp_res, 1);
+    send_udp_pkt(udp_socket, udp_res, 1);//Send High entropy
 
-    sleep(5);
+    //sleep();
 
     printf("Client: Reconnecting to server for result (Post-Probing Phase)...\n");
     tcp_socket = client_probing_tcp(SERVER_IP, TCP_PORT_POST_PROBE);

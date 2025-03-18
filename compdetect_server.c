@@ -8,6 +8,7 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <signal.h>
 
 #define TCP_PORT "7777"
 #define TCP_PORT_POST_PROBE "6666"
@@ -17,6 +18,10 @@
 #define ID_EXTRACT sizeof(uint16_t)
 #define INTER_MEASUREMENT_TIME 15
 #define COMPRESSION_THRESHOLD 100000 //Threashold for 100ms
+#define TIME_OUT 15
+
+
+volatile sig_atomic_t timeout_flag = 0;
 
 int server_probing_tcp(const char *server_port){
     int tcp_socket;
@@ -108,14 +113,19 @@ int server_udp_probing(const char *server_port, struct addrinfo **res){
     return udp_socket;
 }
 
+// Signal handler for alarm
+void catch_alarm(int sig_num) {
+    timeout_flag = 1;
+}
+
 long calculate_delta_time(struct timeval start, struct timeval end){
     return ((end.tv_sec - start.tv_sec) * 1000000L) + (end.tv_usec - start.tv_usec);
 }
 
 int recv_udp_pkt(int udp_socket){
-    struct timeval start, end, current, timeout;
-    timeout.tv_sec = 0;
-    timeout.tv_usec = 100000;
+    struct timeval start, end;//, current, timeout;
+    //timeout.tv_sec = 0;
+    //timeout.tv_usec = 100000;
 
     char buffer[PACKET_SIZE];
     struct addrinfo *client_info;
@@ -125,7 +135,14 @@ int recv_udp_pkt(int udp_socket){
     int last_packet_id = -1;
     int pkt_count = 0;
     
-    setsockopt(udp_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    
+    //setsockopt(udp_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+    // Register SIGALRM handler
+    signal(SIGALRM, catch_alarm);
+
+    // Start the collective timeout
+    alarm(TIME_OUT);
 
     ssize_t first_udp_receive = recvfrom(udp_socket, buffer, PACKET_SIZE, 0, client_info->ai_addr, &addr_len);
     
@@ -139,22 +156,22 @@ int recv_udp_pkt(int udp_socket){
     first_packet_id = packet_id;
     last_packet_id = packet_id;
 
-    while(1){
-        printf("Pkt id receiving: %d\n", pkt_count);
+    while(!timeout_flag){
+        //printf("Pkt id receiving: %d\n", pkt_count);
 
-        gettimeofday(&current, NULL);
+        //gettimeofday(&current, NULL);
 
-        long elapsed_time = (current.tv_sec - start.tv_sec) * 1000000L + (current.tv_usec - start.tv_usec);
+        //long elapsed_time = (current.tv_sec - start.tv_sec) * 1000000L + (current.tv_usec - start.tv_usec);
 
-        if(elapsed_time >= timeout.tv_sec * 1000000L){
-            //printf("Timeout, proceeding to next phase");
-            break;
-        }
+        // if(elapsed_time >= timeout.tv_sec * 1000000L){
+        //     //printf("Timeout, proceeding to next phase");
+        //     break;
+        // }
         
         ssize_t receiver = recvfrom(udp_socket, buffer, PACKET_SIZE, 0, NULL, NULL);
         //Extract subsequent packet and only record last packet id arriving
         if(receiver > 0){
-            printf("Pkt count: %d get\n", pkt_count);
+            //printf("Pkt count: %d get\n", pkt_count);
             memcpy(&packet_id, buffer, ID_EXTRACT);
             packet_id = ntohs(packet_id);
             last_packet_id = packet_id;
@@ -166,6 +183,7 @@ int recv_udp_pkt(int udp_socket){
         
     }
 
+    alarm(0);
     gettimeofday(&end, NULL);
 
     //printf("Received UDP packets from ID %d to %d\n", first_packet_id, last_packet_id);
@@ -180,7 +198,7 @@ void clear_udp_buffer(int udp_socket, struct addrinfo *server_info){
     socklen_t addrlen = server_info->ai_addrlen;
 
     while(recvfrom(udp_socket, dummy, PACKET_SIZE, MSG_DONTWAIT, server_info->ai_addr, &addrlen) > 0){
-        //printf("Dropping old UDP pkt");
+        printf("Dropping old UDP pkt\n");
     }
 }
 
@@ -229,7 +247,8 @@ int main(int argc, char *argv[]){
 
         printf("Low entropy time: %ld\n", low_entropy);
 
-        clear_udp_buffer(udp_socket, udp_res);//Clear UDP socket buffer
+        //clear_udp_buffer(udp_socket, udp_res);//Clear UDP socket buffer
+
         //Wait
         sleep(INTER_MEASUREMENT_TIME);
         
@@ -240,7 +259,7 @@ int main(int argc, char *argv[]){
 
         printf("High entropy time: %ld\n", high_entropy);
 
-        long delta_t = high_entropy - low_entropy;
+        long delta_t = low_entropy - high_entropy;
 
         int client_socket_post_probe = accept(tcp_socket_post_probe, NULL, NULL);
         if(client_socket_post_probe == -1){
