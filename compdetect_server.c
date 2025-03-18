@@ -124,6 +124,8 @@ long calculate_delta_time(struct timeval start, struct timeval end){
 
 int recv_udp_pkt(int udp_socket){
     struct timeval start, end;//, current, timeout;
+    timeout_flag = 0;
+    printf("Timeout flag: %d", timeout_flag);
     //timeout.tv_sec = 0;
     //timeout.tv_usec = 100000;
 
@@ -247,7 +249,7 @@ int main(int argc, char *argv[]){
 
         printf("Low entropy time: %ld\n", low_entropy);
 
-        //clear_udp_buffer(udp_socket, udp_res);//Clear UDP socket buffer
+        clear_udp_buffer(udp_socket, udp_res);//Clear UDP socket buffer
 
         //Wait
         sleep(INTER_MEASUREMENT_TIME);
