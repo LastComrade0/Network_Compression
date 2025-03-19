@@ -92,7 +92,7 @@ int server_pre_probing_tcp(const char *server_port){
         printf("Received buffer: %s\n", buffer);
 
         char response[1024];
-        strcpy(response, "OK");
+        strcpy(response, "Configuration received");
         send(new_fd, buffer, sizeof(response), 0);
     }
 
@@ -101,7 +101,7 @@ int server_pre_probing_tcp(const char *server_port){
 
     //Free address info resolve
     freeaddrinfo(res);
-    printf("Server accepted tcp: %d\n", tcp_socket);
+    printf("Server accepted tcp: %d\n\n", tcp_socket);
     return tcp_socket;
 
 }
@@ -157,11 +157,12 @@ long calculate_delta_time(struct timeval start, struct timeval end){
 }
 
 int recv_udp_pkt(int udp_socket){
-    struct timeval start, end;//, current, timeout;
+    printf("Receiving packet train...\n");
+    struct timeval start, end, timeout;//, current, timeout;
     timeout_flag = 0;
     printf("Timeout flag: %d", timeout_flag);
-    //timeout.tv_sec = 0;
-    //timeout.tv_usec = 100000;
+    timeout.tv_sec = 12;
+    timeout.tv_usec = 0;
 
     char buffer[PACKET_SIZE];
     struct sockaddr_storage *client_info;
@@ -172,13 +173,13 @@ int recv_udp_pkt(int udp_socket){
     int pkt_count = 0;
     
     
-    //setsockopt(udp_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(udp_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
     // Register SIGALRM handler
-    signal(SIGALRM, catch_alarm);
+    //signal(SIGALRM, catch_alarm);
 
     // Start the collective timeout
-    alarm(TIME_OUT);
+    //alarm(TIME_OUT);
 
     ssize_t first_udp_receive = recvfrom(udp_socket, buffer, PACKET_SIZE, 0, (struct sockaddr*)&client_info, &addr_len);
     
@@ -197,7 +198,8 @@ int recv_udp_pkt(int udp_socket){
     first_packet_id = packet_id;
     last_packet_id = packet_id;
 
-    while(!timeout_flag){
+    for(int i = 0; i < NUM_PACKETS; i += 1){
+        printf("pkt: %d", i);
         //printf("Pkt id receiving: %d\n", pkt_count);
 
         //gettimeofday(&current, NULL);
@@ -217,15 +219,18 @@ int recv_udp_pkt(int udp_socket){
             packet_id = ntohs(packet_id);
             last_packet_id = packet_id;
             pkt_count += 1;
+            gettimeofday(&end, NULL);
         }
+
+        //alarm(0);//In while loop?
         // else{
         //     printf("UDP packet [%d] lost, last packet ID ramains: %d\n", pkt_count, last_packet_id);
         // }
         
     }
 
-    alarm(0);//In while loop?
-    gettimeofday(&end, NULL);
+    
+    //gettimeofday(&end, NULL);
 
     //printf("Received UDP packets from ID %d to %d\n", first_packet_id, last_packet_id);
 
@@ -350,17 +355,17 @@ int main(int argc, char *argv[]){
     int udp_socket;
 
     printf("Server Start\n");
-    printf("Waiting client connection: \n");
+    printf("Waiting client connection: \n\n");
 
     tcp_socket_pre_probe = server_pre_probing_tcp(TCP_PORT);
 
-    printf("TCP pre probe done\n");
+    printf("TCP pre probe done\n\n");
 
     printf("Setting up UDP socket...\n");
 
     udp_socket = server_udp_probing(UDP_PORT, &udp_res);
 
-    printf("Setting up UDP socket done\n");
+    printf("Setting up UDP socket done\n\n");
 
     sleep(3);
 

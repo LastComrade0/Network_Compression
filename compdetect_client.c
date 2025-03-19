@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 
-#define SERVER_IP "192.168.132.210"  
+#define SERVER_IP "192.168.64.15"  // 192.168.132.210 or 192.168.64.15
 #define TCP_PORT_PRE_PROBE "7777"
 #define TCP_PORT_POST_PROBE "6666"
 #define UDP_SRC_PORT "9876"
@@ -20,12 +20,12 @@
 #define ID_EXTRACT sizeof(uint16_t)
 #define INTER_MEASUREMENT_TIME 60
 
-int client_probing_tcp(const char *server_ip, const char *server_port){
+int client_tcp_pre_probing(const char *server_ip, const char *server_port){
     printf("TCP pre probing\n");
     int tcp_socket;
     struct addrinfo hint, *res;
     int addr_info;
-    char msg[] = "Test send";
+    char msg[] = "Sending Configuration";
     char buffer[1024];
     
     
@@ -55,13 +55,14 @@ int client_probing_tcp(const char *server_ip, const char *server_port){
         exit(1);
     }
 
+    //Send message to server
     send(tcp_socket, msg, strlen(msg), 0);
     
     int bytes_recvd = recv(tcp_socket, buffer, sizeof(buffer) - 1, 0);
 
     if(bytes_recvd > 0){
         buffer[bytes_recvd] = '\0';
-        printf("Receiverd buffer: %s\n", buffer);
+        printf("Received response: %s\n", buffer);
         
     }
     //close(tcp_socket);
@@ -74,7 +75,7 @@ int client_probing_tcp(const char *server_ip, const char *server_port){
 int client_udp_probing(const char *server_ip, const char *src_port, const char* dest_port, struct addrinfo **res){
     printf("UDP probing\n");
 
-    struct addrinfo hints, *src_res;
+    struct addrinfo hints;
     int udp_socket;
     int addr_info;
 
@@ -98,22 +99,15 @@ int client_udp_probing(const char *server_ip, const char *src_port, const char* 
         exit(1);
     }
 
-    //Resolve source address
-    addr_info = getaddrinfo(NULL, src_port, &hints, &src_res);
+    // //Resolve source address
+    // addr_info = getaddrinfo(NULL, src_port, &hints, &res);
 
-    if(addr_info != 0){
-        fprintf(stderr, "Source hints to src res error %s\n", gai_strerror(addr_info));
-        exit(1);
-    }
+    // if(addr_info != 0){
+    //     fprintf(stderr, "Source hints to src res error %s\n", gai_strerror(addr_info));
+    //     exit(1);
+    // }
 
-    int binder = bind(udp_socket, src_res->ai_addr, src_res->ai_addrlen);
-
-    if(binder == -1){
-        fprintf(stderr, "Bind error %s\n", gai_strerror(binder));
-        exit(1);
-    }
-
-    freeaddrinfo(src_res);
+    //freeaddrinfo(src_res);
     return udp_socket;
 }
 
@@ -183,34 +177,92 @@ int send_udp_pkt(int udp_socket, struct addrinfo *server_info, int entropy_type)
     }
 }
 
+int client_tcp_post_probing(const char *server_ip, const char *server_port){
+    printf("TCP pre probing\n");
+    int tcp_socket;
+    struct addrinfo hint, *res;
+    int addr_info;
+    char msg[] = "Test request delta_t result";
+    char buffer[1024];
+    
+    
+    memset(&hint, 0, sizeof(hint));
+
+    hint.ai_family = AF_INET;
+    hint.ai_socktype = SOCK_STREAM;
+
+    addr_info = getaddrinfo(server_ip, server_port, &hint, &res);
+
+    if(addr_info != 0){
+        fprintf(stderr, "Get address info error %s\n", gai_strerror(addr_info));
+        exit(1);
+    }
+
+    tcp_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+
+    if(tcp_socket == -1){
+        fprintf(stderr, "TCP socket error %s\n", gai_strerror(tcp_socket));
+        exit(1);
+    }
+
+    int connector = connect(tcp_socket, res->ai_addr, res->ai_addrlen);
+
+    if(connector == -1){
+        fprintf(stderr, "Connect error %s\n", gai_strerror(connector));
+        exit(1);
+    }
+
+    send(tcp_socket, msg, strlen(msg), 0);
+    
+    int bytes_recvd = recv(tcp_socket, buffer, sizeof(buffer) - 1, 0);
+
+    if(bytes_recvd > 0){
+        buffer[bytes_recvd] = '\0';
+        printf("Receiverd response from server: %s\n", buffer);
+        
+    }
+    //close(tcp_socket);
+
+    freeaddrinfo(res);
+    return tcp_socket;
+}
+
 
 int main(int argc, char *argv[]){
+    int tcp_socket_pre_probe, tcp_socket_post_probe;
+    int udp_socket;
+
+
     printf("Client");
     
-    int tcp_socket = client_probing_tcp(SERVER_IP, TCP_PORT_PRE_PROBE);
-    close(tcp_socket);
+    tcp_socket_pre_probe = client_tcp_pre_probing(SERVER_IP, TCP_PORT_PRE_PROBE);
+    
 
     struct addrinfo *udp_res;
-    int udp_socket = client_udp_probing(SERVER_IP, UDP_SRC_PORT, UDP_DEST_PORT, &udp_res);
+    udp_socket = client_udp_probing(SERVER_IP, UDP_SRC_PORT, UDP_DEST_PORT, &udp_res);
 
-    send_udp_pkt(udp_socket, udp_res, 1);//Send Low entropy
+    send_udp_pkt(udp_socket, udp_res, 0);//Send Low entropy
 
     sleep(INTER_MEASUREMENT_TIME);
 
     send_udp_pkt(udp_socket, udp_res, 1);//Send High entropy
 
-    //sleep();
+    freeaddrinfo(udp_res);
+
+    sleep(60);
 
     printf("Client: Reconnecting to server for result (Post-Probing Phase)...\n");
-    tcp_socket = client_probing_tcp(SERVER_IP, TCP_PORT_POST_PROBE);
+    tcp_socket_post_probe = client_tcp_post_probing(SERVER_IP, TCP_PORT_POST_PROBE);
 
-    char result[64];
-    recv(tcp_socket, result, sizeof(result), 0);
-    printf("Server response: %s\n", result);
-    close(tcp_socket);
+    //char result[64];
+    // recv(tcp_socket, result, sizeof(result), 0);
+    // printf("Server response: %s\n", result);
+    close(tcp_socket_pre_probe);
 
     close(udp_socket);
-    freeaddrinfo(udp_res);
+
+    close(tcp_socket_post_probe);
+    
 
     return 0;
 }
