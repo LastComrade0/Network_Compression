@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 
-#define SERVER_IP "192.168.132.210"  // 192.168.132.210 or 192.168.64.15
+#define SERVER_IP "192.168.64.15"  // 192.168.132.210(PC server) or 192.168.64.15(Mac server)
 #define TCP_PORT_PRE_PROBE "7777"
 #define TCP_PORT_POST_PROBE "6666"
 #define UDP_SRC_PORT "9876"
@@ -130,7 +130,11 @@ int send_udp_pkt(int udp_socket, struct addrinfo *server_info, int entropy_type)
                 //printf("Sending packet id: %d\n", i);
                 packet_id = htons(i);
                 memcpy(buffer, &packet_id, ID_EXTRACT);
-                sendto(udp_socket, buffer, PACKET_SIZE, 0, server_info->ai_addr, server_info->ai_addrlen);
+                ssize_t sent_udp = sendto(udp_socket, buffer, PACKET_SIZE, 0, server_info->ai_addr, server_info->ai_addrlen);
+                if(sent_udp < 0){
+                    perror("UDP send error");
+                    exit(1);
+                }
                 //printf("Sent low-entropy packet id: %d\n", i);
             }
 
