@@ -10,3 +10,20 @@
 
 # Built Visual Studio Code Extensions
 *.vsix
+
+# Ignore compiled executables (Linux/macOS)
+compdetec_server
+compdetect_client
+
+# Ignore compiled executables (Windows)
+compdetec_server.exe
+compdetect_client.exe
+
+# Ignore object files
+*.o
+
+# Ignore backup files (optional)
+*.out
+*.a
+*.so
+*.dll
