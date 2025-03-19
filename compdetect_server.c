@@ -18,7 +18,7 @@
 #define ID_EXTRACT sizeof(uint16_t)
 #define INTER_MEASUREMENT_TIME 15
 #define COMPRESSION_THRESHOLD 100000 //Threashold for 100ms
-#define TIME_OUT 15
+#define TIME_OUT 10
 
 
 volatile sig_atomic_t timeout_flag = 0;
@@ -106,17 +106,22 @@ int server_pre_probing_tcp(const char *server_port){
 
 }
 
-int server_udp_probing(const char *server_port, struct addrinfo **res){
+int server_udp_probing(const char *server_port){
     int udp_socket;
-    struct addrinfo hints;
+    struct addrinfo hints, *res;
     int addr_info;
+
+    int set_timeout;
+    struct timeval timeout;//, current, timeout;
+    timeout.tv_sec = TIME_OUT;
+    timeout.tv_usec = 0;
 
     memset(&hints, 0 , sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
     hints.ai_flags = AI_PASSIVE;
 
-    addr_info = getaddrinfo(NULL, server_port, &hints, res);
+    addr_info = getaddrinfo(NULL, server_port, &hints, &res);
 
     if(addr_info != 0){
         fprintf(stderr, "Get address info error %s\n", gai_strerror(addr_info));
@@ -124,32 +129,37 @@ int server_udp_probing(const char *server_port, struct addrinfo **res){
     }
 
     //Create UDP socket
-    udp_socket = socket((*res)->ai_family, (*res)->ai_socktype, (*res)->ai_protocol);
+    udp_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 
     if(udp_socket == -1){
         fprintf(stderr, "UDP socket error %s\n", gai_strerror(udp_socket));
         exit(1);
     }
 
-    int dont_fragment = IP_PMTUDISC_DO;
-    if (setsockopt(udp_socket, IPPROTO_IP, IP_MTU_DISCOVER, &dont_fragment, sizeof(dont_fragment)) < 0) {
-        perror("Failed to set Don't Fragment flag");
+    
+    set_timeout = setsockopt(udp_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    if(set_timeout < 0){
+        fprintf(stderr, "UDP set timeout error %s\n", gai_strerror(udp_socket));
         exit(1);
     }
 
-    int binder = bind(udp_socket, (*res)->ai_addr, (*res)->ai_addrlen);
+
+    // int dont_fragment = IP_PMTUDISC_DO;
+    // if (setsockopt(udp_socket, IPPROTO_IP, IP_MTU_DISCOVER, &dont_fragment, sizeof(dont_fragment)) < 0) {
+    //     perror("Failed to set Don't Fragment flag");
+    //     exit(1);
+    // }
+
+    int binder = bind(udp_socket, res->ai_addr, res->ai_addrlen);
 
     if(binder == -1){
         fprintf(stderr, "UDP Bind error %s\n", gai_strerror(binder));
         exit(1);
     }
 
-    return udp_socket;
-}
+    freeaddrinfo(res);
 
-// Signal handler for alarm
-void catch_alarm(int sig_num) {
-    timeout_flag = 1;
+    return udp_socket;
 }
 
 long calculate_delta_time(struct timeval start, struct timeval end){
@@ -158,29 +168,24 @@ long calculate_delta_time(struct timeval start, struct timeval end){
 
 int recv_udp_pkt(int udp_socket){
     printf("Receiving packet train...\n");
-    struct timeval start, end, timeout;//, current, timeout;
-    timeout_flag = 0;
-    printf("Timeout flag: %d", timeout_flag);
-    timeout.tv_sec = 12;
-    timeout.tv_usec = 0;
 
     char buffer[PACKET_SIZE];
-    struct sockaddr_storage *client_info;
+    struct sockaddr_storage client_info;
     socklen_t addr_len = sizeof(client_info);
     int packet_id = 0;
     int first_packet_id = -1;
     int last_packet_id = -1;
     int pkt_count = 0;
-    
-    
-    setsockopt(udp_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
+    struct timeval start, end;
+    
     // Register SIGALRM handler
     //signal(SIGALRM, catch_alarm);
 
     // Start the collective timeout
     //alarm(TIME_OUT);
-
+    
+    gettimeofday(&start, NULL);
     ssize_t first_udp_receive = recvfrom(udp_socket, buffer, PACKET_SIZE, 0, (struct sockaddr*)&client_info, &addr_len);
     
     if(first_udp_receive == -1){
@@ -193,41 +198,36 @@ int recv_udp_pkt(int udp_socket){
     //1st 16 bits are pkt id and rest is entropy data
     //So memcpy 1st 16 bits of buffer defined by 4
     memcpy(&packet_id, buffer, ID_EXTRACT); 
-    gettimeofday(&start, NULL);
 
     first_packet_id = packet_id;
     last_packet_id = packet_id;
 
     for(int i = 0; i < NUM_PACKETS; i += 1){
-        printf("pkt: %d", i);
+        //printf("pkt: %d ", i);
         //printf("Pkt id receiving: %d\n", pkt_count);
 
         //gettimeofday(&current, NULL);
-
-        //long elapsed_time = (current.tv_sec - start.tv_sec) * 1000000L + (current.tv_usec - start.tv_usec);
-
-        // if(elapsed_time >= timeout.tv_sec * 1000000L){
-        //     //printf("Timeout, proceeding to next phase");
-        //     break;
-        // }
         
         ssize_t receiver = recvfrom(udp_socket, buffer, PACKET_SIZE, 0,  (struct sockaddr*)&client_info, &addr_len);
+
+        if(receiver == -1){
+            //fprintf(stderr, "UDP receive timeout, proceeding next step %s\n", gai_strerror(receiver));
+            break;
+        }
+
         //Extract subsequent packet and only record last packet id arriving
-        if(receiver > 0){
-            //printf("Pkt count: %d get\n", pkt_count);
+        else if(receiver > 0){
+            //printf("Pkt count: %d get ", pkt_count);
             memcpy(&packet_id, buffer, ID_EXTRACT);
             packet_id = ntohs(packet_id);
             last_packet_id = packet_id;
             pkt_count += 1;
-            gettimeofday(&end, NULL);
         }
-
-        //alarm(0);//In while loop?
-        // else{
-        //     printf("UDP packet [%d] lost, last packet ID ramains: %d\n", pkt_count, last_packet_id);
-        // }
+        gettimeofday(&end, NULL);
         
     }
+
+    printf("\nTotal pkt received: %d\n", last_packet_id);
 
     
     //gettimeofday(&end, NULL);
@@ -248,7 +248,7 @@ void clear_udp_buffer(int udp_socket, struct addrinfo *server_info){
     }
 }
 
-int server_post_probing_tcp(const char *server_tcp_port, long delta_t, char *result){//const char *server_port
+int server_post_probing_tcp(const char *server_tcp_port, long delta_t){//const char *server_port
     
 
     int tcp_socket, return_fd;
@@ -256,6 +256,7 @@ int server_post_probing_tcp(const char *server_tcp_port, long delta_t, char *res
     int addr_info;//server_pro;
     struct sockaddr_storage client_addr;
     char buffer[1024];
+    char result[64];
     
     
     memset(&hint, 0, sizeof(hint)); //Fill hint addrinfo all 0
@@ -296,6 +297,15 @@ int server_post_probing_tcp(const char *server_tcp_port, long delta_t, char *res
         exit(1);
     }
 
+    printf("\nTCP post probing...\n");
+    printf("Delta t: %ld\n", delta_t);
+    if(delta_t > COMPRESSION_THRESHOLD){
+        strcpy(result, "Compression detected!");
+    }
+    else{
+        strcpy(result, "Compression not detected");
+    }
+
     printf("Server listening to client TCP post probing...\n");
 
     socklen_t addr_size = sizeof(client_addr);
@@ -319,8 +329,8 @@ int server_post_probing_tcp(const char *server_tcp_port, long delta_t, char *res
         printf("Received buffer: %s\n", buffer);
 
         char response[1024];
-        strcpy(response, "OK");
-        send(return_fd, buffer, sizeof(response), 0);
+        strcpy(response, result);
+        send(return_fd, response, sizeof(response), 0);
     }
 
     close(return_fd);
@@ -328,20 +338,7 @@ int server_post_probing_tcp(const char *server_tcp_port, long delta_t, char *res
     //Free address info resolve
     freeaddrinfo(res);
     printf("Server accepted tcp: %d\n", tcp_socket);
-    return tcp_socket;
 
-    
-    printf("Delta t: %ld\n", delta_t);
-    if(delta_t > COMPRESSION_THRESHOLD){
-        strcpy(result, "Compression detected!");
-    }
-    else{
-        strcpy(result, "Compression not detected");
-    }
-
-    //send(client_socket_post_probe, result, strlen(result), 0);
-    printf("Sent: %s\n", result);
-    //close(client_socket_post_probe);
 
     return tcp_socket;
 }
@@ -349,7 +346,6 @@ int server_post_probing_tcp(const char *server_tcp_port, long delta_t, char *res
 int main(int argc, char *argv[]){
 
     char result[64];
-    struct addrinfo *udp_res;
     int tcp_socket_pre_probe;
     int tcp_socket_post_probe;
     int udp_socket;
@@ -363,13 +359,11 @@ int main(int argc, char *argv[]){
 
     printf("Setting up UDP socket...\n");
 
-    udp_socket = server_udp_probing(UDP_PORT, &udp_res);
+    udp_socket = server_udp_probing(UDP_PORT);
 
     printf("Setting up UDP socket done\n\n");
 
-    sleep(3);
-
-    
+    //sleep(3);
 
     // int client_socket = accept(tcp_socket_pre_probe, NULL, NULL);
     // if(client_socket == -1){
@@ -387,7 +381,7 @@ int main(int argc, char *argv[]){
 
     printf("Low entropy time: %ld\n", low_entropy);
 
-    clear_udp_buffer(udp_socket, udp_res);//Clear UDP socket buffer
+    //clear_udp_buffer(udp_socket, udp_res);//Clear UDP socket buffer
     
 
     //Wait
@@ -400,13 +394,11 @@ int main(int argc, char *argv[]){
 
     printf("High entropy time: %ld\n", high_entropy);
 
-    long delta_t = low_entropy - high_entropy;
+    long delta_t = high_entropy - low_entropy;
 
-    freeaddrinfo(udp_res);
+    printf("Post probing tcp to send result\n");
 
-    printf("Post probing tcp to send result");
-
-    tcp_socket_post_probe = server_post_probing_tcp(TCP_PORT_POST_PROBE, delta_t, result);
+    tcp_socket_post_probe = server_post_probing_tcp(TCP_PORT_POST_PROBE, delta_t);
 
     // int client_socket_post_probe = accept(tcp_socket_pre_probe, NULL, NULL); //change to tcp_socket_post_probe
     // if(client_socket_post_probe == -1){
