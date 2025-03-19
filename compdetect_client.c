@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 
-#define SERVER_IP "192.168.64.15"  // 192.168.132.210(PC server) or 192.168.64.15(Mac server)
+#define SERVER_IP "192.168.132.210"  // 192.168.132.210(PC server) or 192.168.64.15(Mac server)
 #define TCP_PORT_PRE_PROBE "7777"
 #define TCP_PORT_POST_PROBE "6666"
 #define UDP_SRC_PORT "9876"
@@ -232,6 +232,8 @@ int client_tcp_post_probing(const char *server_ip, const char *server_port){
         
     }
     //close(tcp_socket);
+
+    sleep(3);
 
     freeaddrinfo(res);
     return tcp_socket;
