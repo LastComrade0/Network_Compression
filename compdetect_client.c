@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 
-#define SERVER_IP "192.168.64.15"  // 192.168.132.210 or 192.168.64.15
+#define SERVER_IP "192.168.132.210"  // 192.168.132.210 or 192.168.64.15
 #define TCP_PORT_PRE_PROBE "7777"
 #define TCP_PORT_POST_PROBE "6666"
 #define UDP_SRC_PORT "9876"
@@ -51,7 +51,7 @@ int client_tcp_pre_probing(const char *server_ip, const char *server_port){
     int connector = connect(tcp_socket, res->ai_addr, res->ai_addrlen);
 
     if(connector == -1){
-        fprintf(stderr, "Connect error %s\n", gai_strerror(connector));
+        fprintf(stderr, "Connect error pre probing %s\n", gai_strerror(connector));
         exit(1);
     }
 
@@ -95,6 +95,12 @@ int client_udp_probing(const char *server_ip, const char *src_port, const char* 
     udp_socket = socket((*res)->ai_family, (*res)->ai_socktype, (*res)->ai_protocol);
     
     if(udp_socket == -1){
+        fprintf(stderr, "UDP socket error %s\n", gai_strerror(udp_socket));
+        exit(1);
+    }
+
+    int dont_fragment = IP_PMTUDISC_DO;
+    if(setsockopt(udp_socket, IPPROTO_IP, IP_MTU_DISCOVER, &dont_fragment, sizeof(dont_fragment)) < 0){
         fprintf(stderr, "UDP socket error %s\n", gai_strerror(udp_socket));
         exit(1);
     }
@@ -178,7 +184,7 @@ int send_udp_pkt(int udp_socket, struct addrinfo *server_info, int entropy_type)
 }
 
 int client_tcp_post_probing(const char *server_ip, const char *server_port){
-    printf("TCP pre probing\n");
+    printf("TCP post probing\n");
     int tcp_socket;
     struct addrinfo hint, *res;
     int addr_info;
@@ -208,7 +214,7 @@ int client_tcp_post_probing(const char *server_ip, const char *server_port){
     int connector = connect(tcp_socket, res->ai_addr, res->ai_addrlen);
 
     if(connector == -1){
-        fprintf(stderr, "Connect error %s\n", gai_strerror(connector));
+        fprintf(stderr, "Connect error post probing%s\n", gai_strerror(connector));
         exit(1);
     }
 
@@ -218,7 +224,7 @@ int client_tcp_post_probing(const char *server_ip, const char *server_port){
 
     if(bytes_recvd > 0){
         buffer[bytes_recvd] = '\0';
-        printf("Receiverd response from server: %s\n", buffer);
+        printf("Received response from server: %s\n", buffer);
         
     }
     //close(tcp_socket);
@@ -237,19 +243,26 @@ int main(int argc, char *argv[]){
     
     tcp_socket_pre_probe = client_tcp_pre_probing(SERVER_IP, TCP_PORT_PRE_PROBE);
     
+    sleep(1);
 
     struct addrinfo *udp_res;
     udp_socket = client_udp_probing(SERVER_IP, UDP_SRC_PORT, UDP_DEST_PORT, &udp_res);
 
     send_udp_pkt(udp_socket, udp_res, 0);//Send Low entropy
 
-    sleep(INTER_MEASUREMENT_TIME);
+    printf("Done sending low entropy UDP packet train\n");
+    printf("Wait...\n\n");
+
+    sleep(27);
 
     send_udp_pkt(udp_socket, udp_res, 1);//Send High entropy
 
     freeaddrinfo(udp_res);
 
-    sleep(60);
+    printf("Done sending high entropy UDP packet train\n");
+    printf("Wait...\n\n");
+
+    sleep(20);
 
     printf("Client: Reconnecting to server for result (Post-Probing Phase)...\n");
     tcp_socket_post_probe = client_tcp_post_probing(SERVER_IP, TCP_PORT_POST_PROBE);
