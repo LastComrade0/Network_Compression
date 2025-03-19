@@ -19,6 +19,7 @@
 #define INTER_MEASUREMENT_TIME 15
 #define COMPRESSION_THRESHOLD 100000 //Threashold for 100ms
 #define TIME_OUT 10
+#define RECV_BUFFER 16777216;
 
 
 volatile sig_atomic_t timeout_flag = 0;
@@ -110,6 +111,7 @@ int server_udp_probing(const char *server_port){
     int udp_socket;
     struct addrinfo hints, *res;
     int addr_info;
+    int set_recv_buffer;
 
     int set_timeout;
     struct timeval timeout;//, current, timeout;
@@ -136,6 +138,12 @@ int server_udp_probing(const char *server_port){
         exit(1);
     }
 
+    int receive_buffer = RECV_BUFFER;
+    set_recv_buffer = setsockopt(udp_socket, SOL_SOCKET, SO_RCVBUF, &receive_buffer, sizeof(receive_buffer));
+    if(set_recv_buffer < 0){
+        fprintf(stderr, "Set receive buffer error %s\n", gai_strerror(udp_socket));
+        exit(1);
+    }
     
     set_timeout = setsockopt(udp_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     if(set_timeout < 0){
@@ -232,7 +240,7 @@ int recv_udp_pkt(int udp_socket){
     
     //gettimeofday(&end, NULL);
 
-    //printf("Received UDP packets from ID %d to %d\n", first_packet_id, last_packet_id);
+    printf("Received UDP packets from ID %d to %d\n", first_packet_id, last_packet_id);
 
     return calculate_delta_time(start, end);
 
@@ -250,7 +258,6 @@ void clear_udp_buffer(int udp_socket, struct addrinfo *server_info){
 
 int server_post_probing_tcp(const char *server_tcp_port, long delta_t){//const char *server_port
     
-
     int tcp_socket, return_fd;
     struct addrinfo hint, *res;
     int addr_info;//server_pro;
@@ -320,17 +327,24 @@ int server_post_probing_tcp(const char *server_tcp_port, long delta_t){//const c
 
     if(bytes_recvd == -1){
         perror("Receive error");
+        close(return_fd);
+        close(tcp_socket);
         exit(1);
     }
 
-    else if(bytes_recvd > 0){
-        printf("Byte received: %d\n", bytes_recvd);
-        buffer[bytes_recvd] = '\0';
-        printf("Received buffer: %s\n", buffer);
+    buffer[bytes_recvd] = '\0';
 
-        char response[1024];
-        strcpy(response, result);
-        send(return_fd, response, sizeof(response), 0);
+    printf("Received post probe TCP from client: %s\n\n", buffer);
+
+    printf("Sending result back to client: %s\n\n");
+
+    int send_result = send(return_fd, result, strlen(result), 0);
+
+    if(send_result == -1){
+        perror("Send result error");
+        close(return_fd);
+        close(tcp_socket);
+        exit(1);
     }
 
     close(return_fd);
@@ -338,7 +352,6 @@ int server_post_probing_tcp(const char *server_tcp_port, long delta_t){//const c
     //Free address info resolve
     freeaddrinfo(res);
     printf("Server accepted tcp: %d\n", tcp_socket);
-
 
     return tcp_socket;
 }
@@ -362,15 +375,6 @@ int main(int argc, char *argv[]){
     udp_socket = server_udp_probing(UDP_PORT);
 
     printf("Setting up UDP socket done\n\n");
-
-    //sleep(3);
-
-    // int client_socket = accept(tcp_socket_pre_probe, NULL, NULL);
-    // if(client_socket == -1){
-    //     fprintf(stderr, "Client socket error %s\n", gai_strerror(client_socket));
-    //     exit(1);
-    // }
-    // close(client_socket);
         
     //Low entropy UDP train
 
@@ -380,8 +384,6 @@ int main(int argc, char *argv[]){
     long low_entropy = recv_udp_pkt(udp_socket);
 
     printf("Low entropy time: %ld\n", low_entropy);
-
-    //clear_udp_buffer(udp_socket, udp_res);//Clear UDP socket buffer
     
 
     //Wait
@@ -398,16 +400,9 @@ int main(int argc, char *argv[]){
 
     printf("Post probing tcp to send result\n");
 
-    tcp_socket_post_probe = server_post_probing_tcp(TCP_PORT_POST_PROBE, delta_t);
+    tcp_socket_post_probe = server_post_probing_tcp(TCP_PORT_POST_PROBE, delta_t);    
 
-    // int client_socket_post_probe = accept(tcp_socket_pre_probe, NULL, NULL); //change to tcp_socket_post_probe
-    // if(client_socket_post_probe == -1){
-    //     fprintf(stderr, "Client socket post probe error %s\n", gai_strerror(client_socket_post_probe));
-    //     exit(1);
-    // }
-
-    // post_probe(client_socket_post_probe, delta_t, result);
-    
+    sleep(3);
 
     close(tcp_socket_pre_probe);
     //close(client_socket_post_probe);
