@@ -1,0 +1,13 @@
+{
+    "server_ip" : "192.168.132.210",
+    "udp_src_port" : "9876",
+    "udp_dest_port" : "8765",
+    "tcp_head_syn_dest_port" : "9999",
+    "tcp_tail_syn_dest_port" : "8888",
+    "tcp_port_pre_probe" : "7777",
+    "tcp_port_post_probe" : "6666",
+    "packet_size": 1000,
+    "inter_time" : 15,
+    "packet_count" : 6000,
+    "udp_ttl" : 255
+}
