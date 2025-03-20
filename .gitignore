@@ -27,3 +27,4 @@ compdetect_client.exe
 *.a
 *.so
 *.dll
+*.pcap

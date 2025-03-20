@@ -9,22 +9,69 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include <signal.h>
+#include <cjson/cJSON.h>
 
 #define TCP_PORT "7777"
 #define TCP_PORT_POST_PROBE "6666"
 #define UDP_PORT "8765"
-#define PACKET_SIZE 1000
-#define NUM_PACKETS 6000
 #define ID_EXTRACT sizeof(uint16_t)
 #define INTER_MEASUREMENT_TIME 15
 #define COMPRESSION_THRESHOLD 100000 //Threashold for 100ms
 #define TIME_OUT 10
 #define RECV_BUFFER 16777216;
 
+typedef struct{
+    char server_ip[16];
+    char udp_src_port[6];
+    char udp_dest_port[6];
+    char tcp_head_syn_dest_port[6];
+    char tcp_tail_syn_dest_port[6];
+    char tcp_port_pre_probe[6]; //For part1
+    char tcp_port_post_probe[6]; //For part1
+    int packet_size;
+    int inter_time;
+    int packet_count;
+    int udp_ttl;
+} Config;
 
-volatile sig_atomic_t timeout_flag = 0;
 
-int server_pre_probing_tcp(const char *server_port){
+
+void parse_configfile(const char *json_buffer, Config *config){
+
+    cJSON *json_parser = cJSON_Parse(json_buffer);
+    if(!json_parser){
+        perror("Error parsing JSON");
+        exit(1);
+    }
+
+    strcpy(config->server_ip, cJSON_GetObjectItem(json_parser, "server_ip")->valuestring);
+    strcpy(config->udp_src_port, cJSON_GetObjectItem(json_parser, "udp_src_port")->valuestring);
+    strcpy(config->udp_dest_port, cJSON_GetObjectItem(json_parser, "udp_dest_port")->valuestring);
+    strcpy(config->tcp_head_syn_dest_port, cJSON_GetObjectItem(json_parser, "tcp_head_syn_dest_port")->valuestring);
+    strcpy(config->tcp_tail_syn_dest_port, cJSON_GetObjectItem(json_parser, "tcp_tail_syn_dest_port")->valuestring);
+    strcpy(config->tcp_port_pre_probe, cJSON_GetObjectItem(json_parser, "tcp_port_pre_probe")->valuestring);
+    strcpy(config->tcp_port_post_probe, cJSON_GetObjectItem(json_parser, "tcp_port_post_probe")->valuestring);
+    config->packet_size = cJSON_GetObjectItem(json_parser, "packet_size")->valueint;
+    config->inter_time = cJSON_GetObjectItem(json_parser, "inter_time")->valueint;
+    config->packet_count = cJSON_GetObjectItem(json_parser, "packet_count")->valueint;
+
+    cJSON_Delete(json_parser);
+
+    printf("\nSuccessfully parsed JSON to struct\n\n");
+    printf("Server ip: %s\n", config->server_ip);
+    printf("UDP src port: %s\n", config->udp_src_port);
+    printf("UDP dest port: %s\n", config->udp_dest_port);
+    printf("TCP head syn dest port: %s\n", config->tcp_head_syn_dest_port);
+    printf("TCP tail syn dest port: %s\n", config->tcp_tail_syn_dest_port);
+    printf("TCP port pre probe: %s\n", config->tcp_port_pre_probe);
+    printf("TCP port post probe: %s\n", config->tcp_port_post_probe);
+    printf("Packet Size: %d\n", config->packet_size);
+    printf("Inter time %d\n", config->inter_time);
+    printf("Packet count: %d\n\n", config->packet_count);
+
+}
+
+int server_pre_probing_tcp(const char *server_port, char *json_buffer){
     int tcp_socket, new_fd;
     struct addrinfo hint, *res;
     int addr_info;//server_pro;
@@ -92,9 +139,13 @@ int server_pre_probing_tcp(const char *server_port){
         buffer[bytes_recvd] = '\0';
         printf("Received buffer: %s\n", buffer);
 
+        memcpy(json_buffer, buffer, sizeof(buffer));
+
+        //memset(buffer, 0, sizeof(buffer));
+
         char response[1024];
         strcpy(response, "Configuration received");
-        send(new_fd, buffer, sizeof(response), 0);
+        send(new_fd, response, sizeof(response), 0);
     }
 
     close(new_fd);
@@ -174,10 +225,10 @@ long calculate_delta_time(struct timeval start, struct timeval end){
     return ((end.tv_sec - start.tv_sec) * 1000000L) + (end.tv_usec - start.tv_usec);
 }
 
-int recv_udp_pkt(int udp_socket){
+int recv_udp_pkt(int udp_socket, Config *config){
     printf("Receiving packet train...\n");
 
-    char buffer[PACKET_SIZE];
+    char buffer[config->packet_count];
     struct sockaddr_storage client_info;
     socklen_t addr_len = sizeof(client_info);
     int packet_id = 0;
@@ -194,7 +245,7 @@ int recv_udp_pkt(int udp_socket){
     //alarm(TIME_OUT);
     
     
-    ssize_t first_udp_receive = recvfrom(udp_socket, buffer, PACKET_SIZE, 0, (struct sockaddr*)&client_info, &addr_len);
+    ssize_t first_udp_receive = recvfrom(udp_socket, buffer, config->packet_size, 0, (struct sockaddr*)&client_info, &addr_len);
     
     gettimeofday(&start, NULL);
     if(first_udp_receive == -1){
@@ -211,13 +262,13 @@ int recv_udp_pkt(int udp_socket){
     first_packet_id = packet_id;
     last_packet_id = packet_id;
 
-    for(int i = 0; i < NUM_PACKETS; i += 1){
+    for(int i = 0; i < config->packet_count; i += 1){
         //printf("pkt: %d ", i);
         //printf("Pkt id receiving: %d\n", pkt_count);
 
         //gettimeofday(&current, NULL);
         
-        ssize_t receiver = recvfrom(udp_socket, buffer, PACKET_SIZE, 0,  (struct sockaddr*)&client_info, &addr_len);
+        ssize_t receiver = recvfrom(udp_socket, buffer, config->packet_count, 0,  (struct sockaddr*)&client_info, &addr_len);
 
         if(receiver == -1){
             //fprintf(stderr, "UDP receive timeout, proceeding next step %s\n", gai_strerror(receiver));
@@ -248,14 +299,14 @@ int recv_udp_pkt(int udp_socket){
 
 }
 
-void clear_udp_buffer(int udp_socket, struct addrinfo *server_info){
-    char dummy[PACKET_SIZE];
-    socklen_t addrlen = server_info->ai_addrlen;
+// void clear_udp_buffer(int udp_socket, struct addrinfo *server_info){
+//     char dummy[PACKET_SIZE];
+//     socklen_t addrlen = server_info->ai_addrlen;
 
-    while(recvfrom(udp_socket, dummy, PACKET_SIZE, MSG_DONTWAIT, server_info->ai_addr, &addrlen) > 0){
-        printf("Dropping old UDP pkt\n");
-    }
-}
+//     while(recvfrom(udp_socket, dummy, PACKET_SIZE, MSG_DONTWAIT, server_info->ai_addr, &addrlen) > 0){
+//         printf("Dropping old UDP pkt\n");
+//     }
+// }
 
 int server_post_probing_tcp(const char *server_tcp_port, long delta_t){//const char *server_port
     
@@ -358,16 +409,19 @@ int server_post_probing_tcp(const char *server_tcp_port, long delta_t){//const c
 }
 
 int main(int argc, char *argv[]){
-
+    char json_buffer[2048];
     char result[64];
     int tcp_socket_pre_probe;
     int tcp_socket_post_probe;
     int udp_socket;
+    Config config;
 
     printf("Server Start\n");
     printf("Waiting client connection: \n\n");
 
-    tcp_socket_pre_probe = server_pre_probing_tcp(TCP_PORT);
+    tcp_socket_pre_probe = server_pre_probing_tcp(TCP_PORT, json_buffer);
+
+    parse_configfile(json_buffer, &config);
 
     printf("TCP pre probe done\n\n");
 
@@ -382,18 +436,18 @@ int main(int argc, char *argv[]){
     printf("Ready to receive UDP packets....\n");
 
     printf("Receiveing LOW Entropy UDP packet train\n");
-    long low_entropy = recv_udp_pkt(udp_socket);
+    long low_entropy = recv_udp_pkt(udp_socket, &config);
 
     printf("Low entropy time: %ld\n", low_entropy);
     
 
     //Wait
-    sleep(INTER_MEASUREMENT_TIME);
+    sleep(config.inter_time);
         
 
     //High entropy UDP train
     printf("Receiveing High Entropy UDP packet train\n");
-    long high_entropy = recv_udp_pkt(udp_socket);
+    long high_entropy = recv_udp_pkt(udp_socket, &config);
 
     printf("High entropy time: %ld\n", high_entropy);
 
@@ -403,7 +457,7 @@ int main(int argc, char *argv[]){
 
     tcp_socket_post_probe = server_post_probing_tcp(TCP_PORT_POST_PROBE, delta_t);    
 
-    sleep(3);
+    sleep(6);
 
     close(tcp_socket_pre_probe);
     //close(client_socket_post_probe);
