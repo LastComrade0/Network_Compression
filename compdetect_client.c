@@ -326,6 +326,8 @@ int main(int argc, char *argv[]){
     
     tcp_socket_pre_probe = client_tcp_pre_probing(config.server_ip, config.tcp_port_pre_probe, json_buffer);
     
+    close(tcp_socket_pre_probe);
+
     sleep(1);
 
     struct addrinfo *udp_res;
@@ -342,6 +344,8 @@ int main(int argc, char *argv[]){
 
     freeaddrinfo(udp_res);
 
+    close(udp_socket);
+
     printf("Done sending high entropy UDP packet train\n");
     printf("Wait...\n\n");
 
@@ -353,9 +357,9 @@ int main(int argc, char *argv[]){
     //char result[64];
     // recv(tcp_socket, result, sizeof(result), 0);
     // printf("Server response: %s\n", result);
-    close(tcp_socket_pre_probe);
+    
 
-    close(udp_socket);
+    
 
     close(tcp_socket_post_probe);
     
