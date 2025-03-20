@@ -193,9 +193,10 @@ int recv_udp_pkt(int udp_socket){
     // Start the collective timeout
     //alarm(TIME_OUT);
     
-    gettimeofday(&start, NULL);
+    
     ssize_t first_udp_receive = recvfrom(udp_socket, buffer, PACKET_SIZE, 0, (struct sockaddr*)&client_info, &addr_len);
     
+    gettimeofday(&start, NULL);
     if(first_udp_receive == -1){
         perror("First UDP packet failed to receive");
         exit(1);
