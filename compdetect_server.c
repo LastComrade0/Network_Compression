@@ -29,7 +29,7 @@ int server_pre_probing_tcp(const char *server_port){
     struct addrinfo hint, *res;
     int addr_info;//server_pro;
     struct sockaddr_storage client_addr;
-    char buffer[1024];
+    char buffer[2048];
     
     
     memset(&hint, 0, sizeof(hint)); //Fill hint addrinfo all 0
@@ -337,7 +337,7 @@ int server_post_probing_tcp(const char *server_tcp_port, long delta_t){//const c
 
     printf("Received post probe TCP from client: %s\n\n", buffer);
 
-    printf("Sending result back to client: %s\n\n");
+    printf("Sending result back to client: %s\n\n", result);
 
     int send_result = send(return_fd, result, strlen(result), 0);
 
