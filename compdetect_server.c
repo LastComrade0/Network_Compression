@@ -304,6 +304,15 @@ int recv_udp_pkt(int udp_socket, Config *config){
 //     }
 // }
 
+
+void clear_udp_buffer(int udp_socket){
+    char dummy[2048];
+    while (recvfrom(udp_socket, dummy, sizeof(dummy), MSG_DONTWAIT, NULL, NULL) > 0) {
+        syslog(LOG_INFO, "Flushed lingering Train 1 packet");
+    }
+}
+
+
 int server_post_probing_tcp(const char *server_tcp_port, long delta_t){//const char *server_port
     
     int tcp_socket, return_fd;
@@ -441,7 +450,7 @@ int main(int argc, char *argv[]){
 
     //Wait
     sleep(config.inter_time);
-        
+    clear_udp_buffer(udp_socket);
 
     //High entropy UDP train
     syslog(LOG_INFO, "Receiveing High Entropy UDP packet train\n");
