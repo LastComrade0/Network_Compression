@@ -195,6 +195,11 @@ int server_udp_probing(const char *server_port){
         fprintf(stderr, "Set receive buffer error %s\n", gai_strerror(udp_socket));
         exit(1);
     }
+
+    int actual;
+    socklen_t optlen = sizeof(actual);
+    getsockopt(udp_socket, SOL_SOCKET, SO_RCVBUF, &actual, &optlen);
+    syslog(LOG_INFO, "Actual receive buffer: %d bytes\n", actual);
     
     set_timeout = setsockopt(udp_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     if(set_timeout < 0){
