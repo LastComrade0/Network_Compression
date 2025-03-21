@@ -168,15 +168,6 @@ int client_udp_probing(const char *server_ip, const char *src_port, const char* 
         exit(1);
     }
 
-    // //Resolve source address
-    // addr_info = getaddrinfo(NULL, src_port, &hints, &res);
-
-    // if(addr_info != 0){
-    //     fprintf(stderr, "Source hints to src res error %s\n", gai_strerror(addr_info));
-    //     exit(1);
-    // }
-
-    //freeaddrinfo(src_res);
     return udp_socket;
 }
 
@@ -380,8 +371,6 @@ int main(int argc, char *argv[]){
 
     syslog(LOG_INFO, "Done sending high entropy UDP packet train\n");
     syslog(LOG_INFO, "Wait...\n\n");
-
-    //sleep(20);
 
     syslog(LOG_INFO, "Client: Reconnecting to server for result (Post-Probing Phase)...\n");
     
