@@ -13,8 +13,6 @@
 #include <cjson/cJSON.h>
 
 #define TCP_PORT "7777"
-#define TCP_PORT_POST_PROBE "6666"
-#define UDP_PORT "8765"
 #define ID_EXTRACT sizeof(uint16_t)
 #define COMPRESSION_THRESHOLD 100000 //Threashold for 100ms
 #define TIME_OUT 10
@@ -444,7 +442,7 @@ int main(int argc, char *argv[]){
 
     syslog(LOG_INFO, "Setting up UDP socket...\n");
 
-    udp_socket = server_udp_probing(UDP_PORT);
+    udp_socket = server_udp_probing(config.udp_dest_port);
 
     syslog(LOG_INFO, "Setting up UDP socket done\n\n");
         
@@ -472,7 +470,7 @@ int main(int argc, char *argv[]){
 
     syslog(LOG_INFO, "Post probing tcp to send result\n\n");
 
-    tcp_socket_post_probe = server_post_probing_tcp(TCP_PORT_POST_PROBE, delta_t);    
+    tcp_socket_post_probe = server_post_probing_tcp(config.tcp_port_post_probe, delta_t);    
 
     close(tcp_socket_pre_probe);
     //close(client_socket_post_probe);
