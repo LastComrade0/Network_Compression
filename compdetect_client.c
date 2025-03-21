@@ -387,12 +387,6 @@ int main(int argc, char *argv[]){
     
     tcp_socket_post_probe = client_tcp_post_probing(config.server_ip, config.tcp_port_post_probe);
 
-    //char result[64];
-    // recv(tcp_socket, result, sizeof(result), 0);
-    // printf("Server response: %s\n", result);
-    
-
-    
 
     close(tcp_socket_post_probe);
     
