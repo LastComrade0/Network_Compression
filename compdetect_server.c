@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include <signal.h>
+#include <syslog.h>
 #include <cjson/cJSON.h>
 
 #define TCP_PORT "7777"
@@ -57,17 +58,17 @@ void parse_configfile(const char *json_buffer, Config *config){
 
     cJSON_Delete(json_parser);
 
-    printf("\nSuccessfully parsed JSON to struct\n\n");
-    printf("Server ip: %s\n", config->server_ip);
-    printf("UDP src port: %s\n", config->udp_src_port);
-    printf("UDP dest port: %s\n", config->udp_dest_port);
-    printf("TCP head syn dest port: %s\n", config->tcp_head_syn_dest_port);
-    printf("TCP tail syn dest port: %s\n", config->tcp_tail_syn_dest_port);
-    printf("TCP port pre probe: %s\n", config->tcp_port_pre_probe);
-    printf("TCP port post probe: %s\n", config->tcp_port_post_probe);
-    printf("Packet Size: %d\n", config->packet_size);
-    printf("Inter time %d\n", config->inter_time);
-    printf("Packet count: %d\n\n", config->packet_count);
+    syslog(LOG_INFO, "Successfully parsed JSON to struct\n\n");
+    syslog(LOG_INFO, "Server ip: %s\n", config->server_ip);
+    syslog(LOG_INFO, "UDP src port: %s\n", config->udp_src_port);
+    syslog(LOG_INFO, "UDP dest port: %s\n", config->udp_dest_port);
+    syslog(LOG_INFO, "TCP head syn dest port: %s\n", config->tcp_head_syn_dest_port);
+    syslog(LOG_INFO, "TCP tail syn dest port: %s\n", config->tcp_tail_syn_dest_port);
+    syslog(LOG_INFO, "TCP port pre probe: %s\n", config->tcp_port_pre_probe);
+    syslog(LOG_INFO, "TCP port post probe: %s\n", config->tcp_port_post_probe);
+    syslog(LOG_INFO, "Packet Size: %d\n", config->packet_size);
+    syslog(LOG_INFO, "Inter time %d\n", config->inter_time);
+    syslog(LOG_INFO, "Packet count: %d\n\n", config->packet_count);
 
 }
 
@@ -117,7 +118,7 @@ int server_pre_probing_tcp(const char *server_port, char *json_buffer){
         exit(1);
     }
 
-    printf("Server listening to client TCP pre probing...\n");
+    syslog(LOG_INFO, "Server listening to client TCP pre probing...\n");
 
     socklen_t addr_size = sizeof(client_addr);
     new_fd = accept(tcp_socket, (struct sockaddr*)&client_addr, &addr_size);
@@ -135,9 +136,9 @@ int server_pre_probing_tcp(const char *server_port, char *json_buffer){
     }
 
     else if(bytes_recvd > 0){
-        printf("Byte received: %d\n", bytes_recvd);
+        syslog(LOG_INFO, "Byte received: %d\n", bytes_recvd);
         buffer[bytes_recvd] = '\0';
-        printf("Received buffer: %s\n", buffer);
+        syslog(LOG_INFO, "Received buffer: %s\n\n", buffer);
 
         memcpy(json_buffer, buffer, sizeof(buffer));
 
@@ -153,7 +154,7 @@ int server_pre_probing_tcp(const char *server_port, char *json_buffer){
 
     //Free address info resolve
     freeaddrinfo(res);
-    printf("Server accepted tcp: %d\n\n", tcp_socket);
+    syslog(LOG_INFO, "Server accepted tcp: %d\n\n", tcp_socket);
     return tcp_socket;
 
 }
@@ -226,7 +227,7 @@ long calculate_delta_time(struct timeval start, struct timeval end){
 }
 
 int recv_udp_pkt(int udp_socket, Config *config){
-    printf("Receiving packet train...\n");
+    syslog(LOG_INFO, "Receiving packet train...\n\n");
 
     char buffer[config->packet_count];
     struct sockaddr_storage client_info;
@@ -263,21 +264,16 @@ int recv_udp_pkt(int udp_socket, Config *config){
     last_packet_id = packet_id;
 
     for(int i = 0; i < config->packet_count; i += 1){
-        //printf("pkt: %d ", i);
-        //printf("Pkt id receiving: %d\n", pkt_count);
 
-        //gettimeofday(&current, NULL);
         
         ssize_t receiver = recvfrom(udp_socket, buffer, config->packet_count, 0,  (struct sockaddr*)&client_info, &addr_len);
 
-        if(receiver == -1){
-            //fprintf(stderr, "UDP receive timeout, proceeding next step %s\n", gai_strerror(receiver));
+        if(receiver <= 0){
             break;
         }
 
         //Extract subsequent packet and only record last packet id arriving
         else if(receiver > 0){
-            //printf("Pkt count: %d get ", pkt_count);
             memcpy(&packet_id, buffer, ID_EXTRACT);
             packet_id = ntohs(packet_id);
             last_packet_id = packet_id;
@@ -287,12 +283,12 @@ int recv_udp_pkt(int udp_socket, Config *config){
         
     }
 
-    printf("\nTotal pkt received: %d\n", last_packet_id);
+    syslog(LOG_INFO, "Total pkt received: %d\n", pkt_count);
 
     
     //gettimeofday(&end, NULL);
 
-    printf("Received UDP packets from ID %d to %d\n", first_packet_id, last_packet_id);
+    syslog(LOG_INFO, "Received UDP packets from ID %d to %d\n", first_packet_id, last_packet_id);
 
     return calculate_delta_time(start, end);
 
@@ -356,8 +352,8 @@ int server_post_probing_tcp(const char *server_tcp_port, long delta_t){//const c
         exit(1);
     }
 
-    printf("\nTCP post probing...\n");
-    printf("Delta t: %ld\n", delta_t);
+    syslog(LOG_INFO, "TCP post probing...\n");
+    syslog(LOG_INFO, "Delta t: %ld\n", delta_t);
     if(delta_t > COMPRESSION_THRESHOLD){
         strcpy(result, "Compression detected!");
     }
@@ -365,7 +361,7 @@ int server_post_probing_tcp(const char *server_tcp_port, long delta_t){//const c
         strcpy(result, "Compression not detected");
     }
 
-    printf("Server listening to client TCP post probing...\n");
+    syslog(LOG_INFO, "Server listening to client TCP post probing...\n");
 
     socklen_t addr_size = sizeof(client_addr);
     return_fd = accept(tcp_socket, (struct sockaddr*)&client_addr, &addr_size);
@@ -386,9 +382,9 @@ int server_post_probing_tcp(const char *server_tcp_port, long delta_t){//const c
 
     buffer[bytes_recvd] = '\0';
 
-    printf("Received post probe TCP from client: %s\n\n", buffer);
+    syslog(LOG_INFO, "Received post probe TCP from client: %s\n\n", buffer);
 
-    printf("Sending result back to client: %s\n\n", result);
+    syslog(LOG_INFO, "Sending result back to client: %s\n\n", result);
 
     int send_result = send(return_fd, result, strlen(result), 0);
 
@@ -403,7 +399,7 @@ int server_post_probing_tcp(const char *server_tcp_port, long delta_t){//const c
 
     //Free address info resolve
     freeaddrinfo(res);
-    printf("Server accepted tcp: %d\n", tcp_socket);
+    syslog(LOG_INFO, "Server accepted tcp: %d\n", tcp_socket);
 
     return tcp_socket;
 }
@@ -416,29 +412,31 @@ int main(int argc, char *argv[]){
     int udp_socket;
     Config config;
 
-    printf("Server Start\n");
-    printf("Waiting client connection: \n\n");
+    openlog("Server", LOG_PID | LOG_CONS | LOG_PERROR, LOG_USER);
+
+    syslog(LOG_INFO, "Server Start\n");
+    syslog(LOG_INFO, "Waiting client connection... \n\n");
 
     tcp_socket_pre_probe = server_pre_probing_tcp(TCP_PORT, json_buffer);
 
     parse_configfile(json_buffer, &config);
 
-    printf("TCP pre probe done\n\n");
+    syslog(LOG_INFO, "TCP pre probe done\n\n");
 
-    printf("Setting up UDP socket...\n");
+    syslog(LOG_INFO, "Setting up UDP socket...\n");
 
     udp_socket = server_udp_probing(UDP_PORT);
 
-    printf("Setting up UDP socket done\n\n");
+    syslog(LOG_INFO, "Setting up UDP socket done\n\n");
         
     //Low entropy UDP train
 
-    printf("Ready to receive UDP packets....\n");
+    syslog(LOG_INFO, "Ready to receive UDP packets....\n");
 
-    printf("Receiveing LOW Entropy UDP packet train\n");
+    syslog(LOG_INFO, "Receiveing LOW Entropy UDP packet train\n");
     long low_entropy = recv_udp_pkt(udp_socket, &config);
 
-    printf("Low entropy time: %ld\n", low_entropy);
+    syslog(LOG_INFO, "Low entropy time: %ld\n", low_entropy);
     
 
     //Wait
@@ -446,14 +444,14 @@ int main(int argc, char *argv[]){
         
 
     //High entropy UDP train
-    printf("Receiveing High Entropy UDP packet train\n");
+    syslog(LOG_INFO, "Receiveing High Entropy UDP packet train\n");
     long high_entropy = recv_udp_pkt(udp_socket, &config);
 
-    printf("High entropy time: %ld\n", high_entropy);
+    syslog(LOG_INFO, "High entropy time: %ld\n", high_entropy);
 
     long delta_t = high_entropy - low_entropy;
 
-    printf("Post probing tcp to send result\n");
+    syslog(LOG_INFO, "Post probing tcp to send result\n\n");
 
     tcp_socket_post_probe = server_post_probing_tcp(TCP_PORT_POST_PROBE, delta_t);    
 
@@ -464,6 +462,7 @@ int main(int argc, char *argv[]){
     close(udp_socket);
     close(tcp_socket_post_probe);
     
+    closelog();
 
     return 0;
 }
