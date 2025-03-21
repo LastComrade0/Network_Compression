@@ -16,10 +16,9 @@
 #define TCP_PORT_POST_PROBE "6666"
 #define UDP_PORT "8765"
 #define ID_EXTRACT sizeof(uint16_t)
-#define INTER_MEASUREMENT_TIME 15
 #define COMPRESSION_THRESHOLD 100000 //Threashold for 100ms
 #define TIME_OUT 10
-#define RECV_BUFFER 16777216;
+#define RECV_BUFFER 16777216
 
 typedef struct{
     char server_ip[16];
@@ -226,10 +225,14 @@ long calculate_delta_time(struct timeval start, struct timeval end){
     return ((end.tv_sec - start.tv_sec) * 1000000L) + (end.tv_usec - start.tv_usec);
 }
 
+long local_time_diff(struct timeval start, struct timeval end) {
+    return ((end.tv_sec - start.tv_sec) * 1000000L) + (end.tv_usec - start.tv_usec);
+}
+
 int recv_udp_pkt(int udp_socket, Config *config){
     syslog(LOG_INFO, "Receiving packet train...\n\n");
 
-    char buffer[config->packet_count];
+    char buffer[config->packet_size];
     struct sockaddr_storage client_info;
     socklen_t addr_len = sizeof(client_info);
     int packet_id = 0;
@@ -237,7 +240,7 @@ int recv_udp_pkt(int udp_socket, Config *config){
     int last_packet_id = -1;
     int pkt_count = 0;
 
-    struct timeval start, end;
+    struct timeval start, end, finish;
     
     // Register SIGALRM handler
     //signal(SIGALRM, catch_alarm);
@@ -263,25 +266,27 @@ int recv_udp_pkt(int udp_socket, Config *config){
     first_packet_id = packet_id;
     last_packet_id = packet_id;
 
-    for(int i = 0; i < config->packet_count; i += 1){
+    do{
 
         
         ssize_t receiver = recvfrom(udp_socket, buffer, config->packet_count, 0,  (struct sockaddr*)&client_info, &addr_len);
-
-        if(receiver <= 0){
-            break;
-        }
+        gettimeofday(&finish, NULL);
+        // if(receiver <= 0){
+        //     break;
+        // }
 
         //Extract subsequent packet and only record last packet id arriving
-        else if(receiver > 0){
+        if(receiver > 0){
             memcpy(&packet_id, buffer, ID_EXTRACT);
             packet_id = ntohs(packet_id);
             last_packet_id = packet_id;
             pkt_count += 1;
+            gettimeofday(&end, NULL);
         }
-        gettimeofday(&end, NULL);
         
-    }
+        
+        
+    }while(local_time_diff(start, finish) < (TIME_OUT) * 1000000);
 
     syslog(LOG_INFO, "Total pkt received: %d\n", pkt_count);
 
@@ -463,8 +468,6 @@ int main(int argc, char *argv[]){
     syslog(LOG_INFO, "Post probing tcp to send result\n\n");
 
     tcp_socket_post_probe = server_post_probing_tcp(TCP_PORT_POST_PROBE, delta_t);    
-
-    sleep(6);
 
     close(tcp_socket_pre_probe);
     //close(client_socket_post_probe);
