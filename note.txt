@@ -1,0 +1,1 @@
+Add reason(network problem) for significant low entropy packet loss and state that high entropy almost always gets 6000 pkt in readme.

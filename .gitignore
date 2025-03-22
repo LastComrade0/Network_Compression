@@ -14,10 +14,12 @@
 # Ignore compiled executables (Linux/macOS)
 compdetect_server
 compdetect_client
+compdetect
 
 # Ignore compiled executables (Windows)
 compdetect_server.exe
 compdetect_client.exe
+compdetect.exe
 
 # Ignore object files
 *.o
