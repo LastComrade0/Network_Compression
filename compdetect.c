@@ -145,8 +145,8 @@ void send_syn_pkt(int socket, struct sockaddr_in *dest, int port, const char *sr
     iph->ip_src.s_addr = inet_addr(src_ip);
     iph->ip_dst.s_addr = dest->sin_addr.s_addr;
 
-    tcpheader->th_sport = htons(1234); //Arbitrary port
-    tcpheader->th_dport = htons(port);
+    tcpheader->th_sport = htons(port); //Arbitrary port
+    tcpheader->th_dport = htons(9999);
     tcpheader->th_seq = random();
     tcpheader->th_ack = 0;
     tcpheader->th_x2 = 0;
@@ -446,11 +446,11 @@ int main(int argc, char* argv[]){
     send_udp_train(udp_socket, udp_res, 0, &config); //Low entropy
     send_syn_pkt(tcp_raw_socket, &sin, port_y, application_ip); 
 
-    sleep(15);
+    // sleep(15);
 
-    send_syn_pkt(tcp_raw_socket, &sin, port_x, application_ip);
-    send_udp_train(udp_socket, udp_res, 1, &config); //High entropy
-    send_syn_pkt(tcp_raw_socket, &sin, port_y, application_ip);
+    // send_syn_pkt(tcp_raw_socket, &sin, port_x, application_ip);
+    // send_udp_train(udp_socket, udp_res, 1, &config); //High entropy
+    // send_syn_pkt(tcp_raw_socket, &sin, port_y, application_ip);
     
     //int rst1 = capture_rst_pkt(tcp_raw_socket, &low_rst1_time); //thread 2
     int rst2 = capture_rst_pkt(tcp_raw_socket, &low_rst2_time);
