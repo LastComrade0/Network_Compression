@@ -106,7 +106,10 @@ void send_syn_pkt(int socket, struct sockaddr_in *dest, int port, const char *se
 int capture_rst_pkt(int socket, struct timeval *timestamp){
 
     syslog(LOG_INFO, "Capturing RST pkt\n");
-    struct timeval timeout = {TIMEOUT_SEC, 0};
+    struct timeval timeout;
+
+    timeout.tv_sec = 5;
+    timeout.tv_usec = 0;
 
     fd_set fd;
     FD_ZERO(&fd);
@@ -124,6 +127,7 @@ int capture_rst_pkt(int socket, struct timeval *timestamp){
         return 1;
     }
 
+    syslog(LOG_INFO, "Catched nothing before timeout\n");
     return 0;
     
 }
@@ -179,15 +183,18 @@ int main(int argc, char* argv[]){
 
     send_syn_pkt(tcp_raw_socket, &sin, port_x, server_ip); //thread1
     //send_udp_train(); Low entropy
-    //send_syn_pkt(tcp_raw_sock, &sin, port_y, server_ip); 
+    send_syn_pkt(tcp_raw_socket, &sin, port_y, server_ip); 
 
-    //send_syn_pkt(tcp_raw_sock, &sin, port_x, server_ip);
+    sleep(15);
+
+    send_syn_pkt(tcp_raw_socket, &sin, port_x, server_ip);
     //send_udp_train();
-    //send_syn_pkt(tcp_raw_sock, &sin, port_y, server_ip);
+    send_syn_pkt(tcp_raw_socket, &sin, port_y, server_ip);
 
     int rst1 = capture_rst_pkt(tcp_raw_socket, &low_rst1_time); //thread 2
-    //int rst2 = capture_rst_pkt(host 192.168.132.210 a_raw_socket, &high_rst1_time);
-    int rst4 = capture_rst_pkt(tcp_raw_socket, &high_rst2_time);
+    int rst2 = capture_rst_pkt(tcp_raw_socket, &low_rst2_time);
+    //int rst3 = capture_rst_pkt(host 192.168.132.210 a_raw_socket, &high_rst1_time);
+    //int rst4 = capture_rst_pkt(tcp_raw_socket, &high_rst2_time);
 
 
     //if(!rst1 | !rst2 | !rst3 | !rst4)
