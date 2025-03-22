@@ -455,7 +455,7 @@ int main(int argc, char *argv[]){
 
     syslog(LOG_INFO, "Low entropy time: %ld\n", low_entropy);
     
-
+    syslog(LOG_INFO, "Starting to wait for %d seconds", config.inter_time);
     //Wait
     sleep(config.inter_time);
     clear_udp_buffer(udp_socket);
