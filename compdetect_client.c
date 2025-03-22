@@ -359,9 +359,9 @@ int main(int argc, char *argv[]){
     send_udp_pkt(udp_socket, udp_res, 0, &config);//Send Low entropy
 
     syslog(LOG_INFO, "Done sending low entropy UDP packet train\n");
-    syslog(LOG_INFO, "Wait...\n\n");
+    syslog(LOG_INFO, "Wait for %d seconds\n\n", config.inter_time + 12);
 
-    sleep(27);
+    sleep(config.inter_time + 12);
 
     send_udp_pkt(udp_socket, udp_res, 1, &config);//Send High entropy
 
