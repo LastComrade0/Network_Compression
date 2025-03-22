@@ -15,11 +15,13 @@
 compdetect_server
 compdetect_client
 compdetect
+compdetect_dest
 
 # Ignore compiled executables (Windows)
 compdetect_server.exe
 compdetect_client.exe
 compdetect.exe
+compdetect_dest.ext
 
 # Ignore object files
 *.o
