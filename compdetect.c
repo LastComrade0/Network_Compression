@@ -1,5 +1,5 @@
-#define __USE_BSD	/* use bsd'ish ip header */
-#define __FAVOR_BSD	/* use bsd'ish tcp header */
+//#define __USE_BSD	/* use bsd'ish ip header */
+//#define __FAVOR_BSD	/* use bsd'ish tcp header */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +30,8 @@
 #define NUM_PACKETS 100
 #define TIMEOUT_SEC 5
 #define ID_EXTRACT sizeof(uint16_t)
+#define OPT_SIZE 20
+#define DATAGRAM_LEN 4096
 
 struct rst_capture_args{
     int socket;
@@ -37,11 +39,11 @@ struct rst_capture_args{
     int *result_ptr;
 };
 
-struct prototype_header{ //For checksum
+struct pseudo_header{ //For checksum
     uint32_t src_addr;
     uint32_t dest_addr;
-    uint32_t reserved;
-    uint32_t protocol;
+    uint8_t reserved;
+    uint8_t protocol;
     uint32_t tcp_length;
 };
 
@@ -115,48 +117,100 @@ long time_diff(struct timeval start, struct timeval end) {
     return ((end.tv_sec - start.tv_sec) * 1000000L) + (end.tv_usec - start.tv_usec);
 }
 
-unsigned short check_sum(unsigned short *buffer, int nwords){
-    unsigned long sum;
-    for(sum = 0; nwords > 0; nwords -= 1){
-        sum += *buffer++;
+unsigned short check_sum(const char *buffer, unsigned size){
+    unsigned long sum = 0, i;
+    for(i = 0; i < size - 1; i += 2){
+        unsigned short word16 = *(unsigned short*) &buffer[i];
+        sum += word16;
     }
 
-    sum = (sum >> 16) + (sum & 0xffff);
-    sum += (sum >> 16);
+    if(size & 1){
+        unsigned short word16 = (unsigned char)buffer[i];
+        sum += 16;
+    }
+
+    while (sum >> 16) {
+        uint16_t lower_16 = sum & 0xFFFF;     // Get the lowest 16 bits
+        uint16_t carry = sum >> 16;           // Get the upper 16 bits (carry)
+        sum = lower_16 + carry;               // Add them together
+    }
+
     return ~sum;
 }
 
-void send_syn_pkt(int socket, struct sockaddr_in *dest, int port, const char *src_ip){
-    char datagram[4096];
+void send_syn_pkt(int socket, struct sockaddr_in *src, struct sockaddr_in *dest, int dest_port){
+    char datagram[DATAGRAM_LEN];
 
-    struct ip *iph = (struct ip*)datagram;
-    struct tcphdr *tcpheader = (struct tcphdr*)(datagram + sizeof(struct ip));
+    struct iphdr *iph = (struct iphdr*)datagram;
+    struct tcphdr *tcpheader = (struct tcphdr*)(datagram + sizeof(struct iphdr));
+    struct pseudo_header psh;
 
-    memset(datagram, 0, 4096);
+    memset(datagram, 0, DATAGRAM_LEN);
 
-    iph->ip_hl = 5;
-    iph->ip_v = 4;
-    iph->ip_len = sizeof(struct ip) + sizeof(struct tcphdr); //No payload
-    iph->ip_id = htonl(10090); //Value does not matter
-    iph->ip_off = 0;
-    iph->ip_ttl = 255;
-    iph->ip_p = IPPROTO_TCP; //Which is 6
-    iph->ip_sum = 0;
-    iph->ip_src.s_addr = inet_addr(src_ip);
-    iph->ip_dst.s_addr = dest->sin_addr.s_addr;
+    iph->ihl = 5;
+    iph->version = 4;
+    iph->tos = 0;
+    iph->tot_len = sizeof(struct iphdr) + sizeof(struct tcphdr) + OPT_SIZE; //No payload
+    iph->id = htonl(rand() % 65535); //Value does not matter
+    iph->frag_off = 0;
+    iph->ttl = 255;
+    iph->protocol = IPPROTO_TCP; //Which is 6
+    iph->check = 0;
+    iph->saddr = src->sin_addr.s_addr;
+    iph->daddr = dest->sin_addr.s_addr;
 
-    tcpheader->th_sport = htons(port); //Arbitrary port
-    tcpheader->th_dport = htons(9999);
-    tcpheader->th_seq = random();
-    tcpheader->th_ack = 0;
-    tcpheader->th_x2 = 0;
-    tcpheader->th_off = sizeof(struct tcphdr) / 4;
-    tcpheader->th_flags = TH_SYN;
+    tcpheader->source = src->sin_port; //Arbitrary port 7777
+    tcpheader->dest = htons(dest_port); //x or y port
+    tcpheader->seq = htonl(rand() % 4294967295);
+    tcpheader->ack_seq = htonl(0);
+    tcpheader->doff = 10; //TCP header size
+    tcpheader->fin = 0;
+    tcpheader->syn = 1;
+    tcpheader->rst = 0;
+    tcpheader->psh = 0;
+    tcpheader->ack = 0;
+    tcpheader->urg = 0;
+    tcpheader->check = 0;
     tcpheader->th_win = htons(65535); //Max allowed window size
-    tcpheader->th_sum = 0; //If set 0, kernel's IP stack will fill correct checksum during transmission
-    tcpheader->th_urp = 0;
+    tcpheader->urg_ptr = 0;
 
-    iph->ip_sum = check_sum((unsigned short *) datagram, iph->ip_len >> 1);
+    //TCP pseudo header for checksum
+    psh.src_addr = src->sin_addr.s_addr;
+    psh.dest_addr = dest->sin_addr.s_addr;
+    psh.reserved = 0;
+    psh.protocol = IPPROTO_TCP;
+    psh.tcp_length = htons(sizeof(struct tcphdr) + OPT_SIZE);
+    int psize =  sizeof(struct pseudo_header) + sizeof(struct tcphdr) + OPT_SIZE;
+
+    //Fill pseudo packet
+    char *pseudogram = malloc(psize);
+    memcpy(pseudogram, (char*)&psh, sizeof(struct pseudo_header));
+    memcpy(pseudogram + sizeof(struct pseudo_header), tcpheader, sizeof(struct tcphdr) + OPT_SIZE);
+
+    // TCP options are only set in the SYN packet
+	// ---- set mss ----
+	datagram[40] = 0x02;
+	datagram[41] = 0x04;
+	int16_t mss = htons(48); // mss value
+	memcpy(datagram + 42, &mss, sizeof(int16_t));
+	// ---- enable SACK ----
+	datagram[44] = 0x04;
+	datagram[45] = 0x02;
+	// do the same for the pseudo header
+	pseudogram[32] = 0x02;
+	pseudogram[33] = 0x04;
+	memcpy(pseudogram + 34, &mss, sizeof(int16_t));
+	pseudogram[36] = 0x04;
+	pseudogram[37] = 0x02;
+
+    tcpheader->th_sum = check_sum((const char*)pseudogram, psize);
+    iph->check = check_sum((const char*) datagram, iph->tot_len);
+    
+
+    printf("Sending SYN to IP: %s, port: %d\n",
+        inet_ntoa(dest->sin_addr),
+        ntohs(dest->sin_port));
+
     
     int one = 1;
     const int *val = &one;
@@ -165,7 +219,9 @@ void send_syn_pkt(int socket, struct sockaddr_in *dest, int port, const char *sr
         syslog(LOG_INFO, "Warning: Unable to set HDRINCL!\n");
     }
 
-    int send_syn = sendto(socket, datagram, iph->ip_len, 0, (struct sockaddr *) dest, sizeof(struct sockaddr_in));
+
+    sleep(1);
+    int send_syn = sendto(socket, datagram, iph->tot_len, 0, (struct sockaddr *) dest, sizeof(struct sockaddr));
     if(send_syn <= 0){
         syslog(LOG_PERROR, "Error: Unable to send syn! %d\n", send_syn);
         exit(1);
@@ -318,7 +374,7 @@ int capture_rst_pkt(int socket, struct timeval *timestamp){
     syslog(LOG_INFO, "Capturing RST pkt\n");
     struct timeval timeout;
 
-    timeout.tv_sec = 5;
+    timeout.tv_sec = 10;
     timeout.tv_usec = 0;
 
     fd_set fd;
@@ -367,7 +423,8 @@ int main(int argc, char* argv[]){
 
     openlog("Server", LOG_PID | LOG_CONS | LOG_PERROR, LOG_USER);
 
-    char* application_ip = "192.168.132.210";
+    char* src_ip = "192.168.132.210";
+    char* dest_ip = "192.168.132.211";
 
     int port_x = atoi("9999");
     int port_y = atoi("8888");
@@ -392,70 +449,87 @@ int main(int argc, char* argv[]){
         exit(1);
     }
 
+    
+    struct sockaddr_in dest_addr;
+    memset(&dest_addr, 0, sizeof(dest_addr));
+    dest_addr.sin_family = AF_INET;
+    //dest_addr.sin_port = htons(0);
+    int set_dest_addr = inet_pton(AF_INET, dest_ip, &dest_addr.sin_addr);
+    if(set_dest_addr != 1){
+        syslog(LOG_INFO, "Dest ip configuration failed");
+        return 1;
+    }
+    //dest_addr.sin_addr.s_addr = inet_addr(dest_ip);
+    //inet_pton(AF_INET, application_ip, &sin.sin_addr);
+
+    struct sockaddr_in src_addr;
+    memset(&src_addr, 0, sizeof(src_addr));
+    src_addr.sin_family = AF_INET;
+    src_addr.sin_port = htons(7777);//rand() % 65535
+    int set_src_addr = inet_pton(AF_INET, src_ip, &src_addr.sin_addr);
+    if(set_src_addr != 1){
+        syslog(LOG_INFO, "Src ip configuration failed");
+        return 1;
+    }
+
     int self_ip_enable = 1;
     int set_self_ip = setsockopt(tcp_raw_socket, IPPROTO_IP, IP_HDRINCL, &self_ip_enable, sizeof(self_ip_enable));
     if(set_self_ip < 0){
         syslog(LOG_ERR, "Error setting IP_HDRINCL: Unable to enable self ip header");
         exit(1);
     }
-    
-    struct sockaddr_in sin;
-    memset(&sin, 0, sizeof(sin));
-    sin.sin_family = AF_INET;
-    sin.sin_port = htons(1234);
-    sin.sin_addr.s_addr = inet_addr(application_ip);
-    //inet_pton(AF_INET, application_ip, &sin.sin_addr);
 
     pthread_t capture_thread; // ✅ Declare the thread variable
 
     struct addrinfo *udp_res;
     udp_socket = set_udp_socket(config.server_ip, config.udp_src_port, config.udp_dest_port, &udp_res, &config);
 
-    // int rst1;
+    int rst1;
 
-     struct timeval low_rst1_time, low_rst2_time, high_rst1_time, high_rst2_time;
+    struct timeval low_rst1_time, low_rst2_time, high_rst1_time, high_rst2_time;
     
-    // struct rst_capture_args args1 = {
-    //     .socket = tcp_raw_socket,
-    //     .timestamp = &low_rst1_time,
-    //     .result_ptr = &rst1
-    // };
+    struct rst_capture_args args1 = {
+        .socket = tcp_raw_socket,
+        .timestamp = &low_rst1_time,
+        .result_ptr = &rst1
+    };
     
     
     
-    // // ✅ Start capture thread
-    // if (pthread_create(&capture_thread, NULL, capture_rst_wrapper, &args1) != 0) {
-    //     perror("pthread_create failed");
-    //     exit(1);
-    // }
+    // ✅ Start capture thread
+    if (pthread_create(&capture_thread, NULL, capture_rst_wrapper, &args1) != 0) {
+        perror("pthread_create failed");
+        exit(1);
+    }
     
-    // // ✅ Send SYN while the thread is capturing
-    // send_syn_pkt(tcp_raw_socket, &sin, port_x, application_ip);
+    // ✅ Send SYN while the thread is capturing
+    send_syn_pkt(tcp_raw_socket, &src_addr, &dest_addr, port_x);
+    send_syn_pkt(tcp_raw_socket, &src_addr, &dest_addr, port_y);
     
-    // // ✅ Wait for capture thread to finish
-    // pthread_join(capture_thread, NULL);
+    // ✅ Wait for capture thread to finish
+    pthread_join(capture_thread, NULL);
     
-    // // ✅ Check result
-    // if (rst1) {
-    //     printf("Captured RST at time: %ld.%06ld\n", low_rst1_time.tv_sec, low_rst1_time.tv_usec);
-    // } else {
-    //     printf("No RST captured.\n");
-    // }
+    // ✅ Check result
+    if (rst1) {
+        printf("Captured RST at time: %ld.%06ld\n", low_rst1_time.tv_sec, low_rst1_time.tv_usec);
+    } else {
+        printf("No RST captured.\n");
+    }
 
-    send_syn_pkt(tcp_raw_socket, &sin, port_x, application_ip); //thread1
-    send_udp_train(udp_socket, udp_res, 0, &config); //Low entropy
-    send_syn_pkt(tcp_raw_socket, &sin, port_y, application_ip); 
+    // send_syn_pkt(tcp_raw_socket, &src_addr, &dest_addr, port_x); //thread1
+    // send_udp_train(udp_socket, udp_res, 0, &config); //Low entropy
+    // send_syn_pkt(tcp_raw_socket, &src_addr, &dest_addr, port_y); 
 
     // sleep(15);
 
-    // send_syn_pkt(tcp_raw_socket, &sin, port_x, application_ip);
+    // send_syn_pkt(tcp_raw_socket, &src_addr, &dest_addr, port_x);
     // send_udp_train(udp_socket, udp_res, 1, &config); //High entropy
-    // send_syn_pkt(tcp_raw_socket, &sin, port_y, application_ip);
+    // send_syn_pkt(tcp_raw_socket, &src_addr, &dest_addr, port_y);
     
-    //int rst1 = capture_rst_pkt(tcp_raw_socket, &low_rst1_time); //thread 2
-    int rst2 = capture_rst_pkt(tcp_raw_socket, &low_rst2_time);
-    //int rst3 = capture_rst_pkt(host 192.168.132.210 a_raw_socket, &high_rst1_time);
-    //int rst4 = capture_rst_pkt(tcp_raw_socket, &high_rst2_time);
+    // int rst1 = capture_rst_pkt(tcp_raw_socket, &low_rst1_time); //thread 2
+    // int rst2 = capture_rst_pkt(tcp_raw_socket, &low_rst2_time);
+    // int rst3 = capture_rst_pkt(tcp_raw_socket, &high_rst1_time);
+    // int rst4 = capture_rst_pkt(tcp_raw_socket, &high_rst2_time);
 
 
     //if(!rst1 | !rst2 | !rst3 | !rst4)
