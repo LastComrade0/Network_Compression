@@ -431,10 +431,17 @@ int main(int argc, char *argv[]){
 
     openlog("Server", LOG_PID | LOG_CONS | LOG_PERROR, LOG_USER);
 
+    if(argc != 2){
+        fprintf(stderr, "Usage: %s <config_file>\n", argv[0]);
+        exit(1);
+    }
+
     syslog(LOG_INFO, "Server Start\n");
     syslog(LOG_INFO, "Waiting client connection... \n\n");
 
-    tcp_socket_pre_probe = server_pre_probing_tcp(TCP_PORT, json_buffer);
+    const char* tcp_port = argv[1];
+
+    tcp_socket_pre_probe = server_pre_probing_tcp(tcp_port, json_buffer);
 
     parse_configfile(json_buffer, &config);
 
