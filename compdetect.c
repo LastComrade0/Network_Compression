@@ -33,6 +33,10 @@
 #define OPT_SIZE 20
 #define DATAGRAM_LEN 4096
 
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+int ready = 0;
+
 struct rst_capture_args{
     int socket;
     struct timeval *timestamp;
@@ -62,6 +66,22 @@ typedef struct{
 
     
 } Config;
+
+typedef struct {
+    int tcp_raw_socket;
+    int udp_socket;
+    struct sockaddr_in src_addr;
+    struct sockaddr_in dest_addr;
+    int port_x;
+    int port_y;
+    struct addrinfo *udp_res;
+    Config* config;
+    struct timeval* low_rst1_time;
+    struct timeval* low_rst2_time;
+    struct timeval* high_rst1_time;
+    struct timeval* high_rst2_time;
+
+} MultithreadingArgs;
 
 void parse_configfile(char *json_file, Config *config, char *json_buffer){
     FILE *file = fopen(json_file, "r");
@@ -207,9 +227,9 @@ void send_syn_pkt(int socket, struct sockaddr_in *src, struct sockaddr_in *dest,
     iph->check = check_sum((const char*) datagram, iph->tot_len);
     
 
-    printf("Sending SYN to IP: %s, port: %d\n",
-        inet_ntoa(dest->sin_addr),
-        ntohs(dest->sin_port));
+    // printf("Sending SYN to IP: %s, port: %d\n",
+    //     inet_ntoa(dest->sin_addr),
+    //     ntohs(dest->sin_port));
 
     
     int one = 1;
@@ -226,9 +246,9 @@ void send_syn_pkt(int socket, struct sockaddr_in *src, struct sockaddr_in *dest,
         syslog(LOG_PERROR, "Error: Unable to send syn! %d\n", send_syn);
         exit(1);
     }
-    else{
-        syslog(LOG_INFO, "Sucessfully sent one SYN packet.\n");
-    }
+    // else{
+    //     syslog(LOG_INFO, "Sucessfully sent one SYN packet.\n");
+    // }
 
 }
 
@@ -287,7 +307,7 @@ void send_udp_train(int udp_socket, struct addrinfo *server_info, int entropy_ty
         case 0:
             memset(buffer, 0, config->packet_size);
 
-            syslog(LOG_INFO, "Sending low entropy train...\n");
+            //syslog(LOG_INFO, "Sending low entropy train...\n");
             for(int i = 0; i < config->packet_count; i += 1){
                 //printf("Sending packet id: %d\n", i);
                 packet_id = htons(i);
@@ -308,13 +328,13 @@ void send_udp_train(int udp_socket, struct addrinfo *server_info, int entropy_ty
                 //printf("Sent low-entropy packet id: %d\n", i);
             }
 
-            syslog(LOG_INFO, "Low entropy packet sent: %d\n", packet_sent);
+            //syslog(LOG_INFO, "Low entropy packet sent: %d\n", packet_sent);
 
             break;
 
         case 1:
 
-            syslog(LOG_INFO, "Sending high entropy udp packet\n");
+            //syslog(LOG_INFO, "Sending high entropy udp packet\n");
             
             int urandom_fd = open("/dev/urandom", O_RDONLY);
 
@@ -354,10 +374,9 @@ void send_udp_train(int udp_socket, struct addrinfo *server_info, int entropy_ty
                 }
                 
                 
-                //printf("Sent high-entropy packet id: %d\n", i);
             }
 
-            syslog(LOG_INFO, "High entropy packet sent: %d\n", packet_sent);
+            //syslog(LOG_INFO, "High entropy packet sent: %d\n", packet_sent);
 
             close(urandom_fd);
 
@@ -369,54 +388,128 @@ void send_udp_train(int udp_socket, struct addrinfo *server_info, int entropy_ty
     }
 }
 
-int capture_rst_pkt(int socket, struct timeval *timestamp){
+int capture_rst_pkt(int socket, struct timeval *timestamp, uint32_t expected_ip_from_dest, uint16_t expected_port_from_dest){
 
-    syslog(LOG_INFO, "Capturing RST pkt\n");
-    struct timeval timeout;
+    //syslog(LOG_INFO, "Capturing RST pkt\n");
 
-    timeout.tv_sec = 10;
-    timeout.tv_usec = 0;
+    struct timeval start, now;//Recording timestamps for start time and current time
+    gettimeofday(&start, NULL);//Record start time
 
-    fd_set fd;
-    FD_ZERO(&fd);
-    FD_SET(socket, &fd);
+    while (1) {
+        // Calculate remaining time (10s timeout)
+        gettimeofday(&now, NULL);
+        long elapsed_us = ((now.tv_sec - start.tv_sec) * 1000000L) + (now.tv_usec - start.tv_usec); //How many micro seconds passed
+        long remaining_us = 10 * 1000000L - elapsed_us; //Current remaining micro seconds since loop starts
+        //Break the loop when remaining micro second reaches 0 AKA time out
+        if (remaining_us <= 0){
+            break;
+        }
 
-    int select_blocking = select(socket + 1, &fd, NULL, NULL, &timeout);
+        //Set timeout for select() as it is inner timeout
+        struct timeval timeout;
+        timeout.tv_sec = remaining_us / 1000000L; //Updated by remaining microsecond
+        timeout.tv_usec = remaining_us % 1000000L;
 
-    if(select_blocking > 0){
+        fd_set fd;
+        FD_ZERO(&fd);
+        FD_SET(socket, &fd);
+
+        int ret = select(socket + 1, &fd, NULL, NULL, &timeout); //So blocking receiving will only be shorter as a new loop goes in where remaining_us becomes smaller
+        if (ret <= 0) {
+            break;  // timeout or error
+        }
+
         char buffer[4096];
         struct sockaddr_storage addr;
         socklen_t addrlen = sizeof(addr);
-        recvfrom(socket, buffer, sizeof(buffer), 0, (struct sockaddr*)&addr, &addrlen);//(struct sockaddr*)&addr?
+        ssize_t recv_len = recvfrom(socket, buffer, sizeof(buffer), 0, (struct sockaddr*)&addr, &addrlen); //Capture any possible packet
+        if (recv_len <= 0) {
+            continue;
+        }
+
         struct ip *iph = (struct ip *)buffer;
         int ip_header_len = iph->ip_hl * 4;
         struct tcphdr *tcph = (struct tcphdr *)(buffer + ip_header_len);
 
-        if (tcph->th_flags & TH_RST) {
+        //Check iff 
+        if ((tcph->th_flags & TH_RST) &&
+            iph->ip_src.s_addr == expected_ip_from_dest &&
+            tcph->dest == expected_port_from_dest) {
+
             gettimeofday(timestamp, NULL);
-            syslog(LOG_INFO, " Captured RST pkt (from port %d)\n", ntohs(tcph->th_sport));
-            return 1;
-        } else {
-            syslog(LOG_INFO, " Captured non-RST TCP packet (flags: 0x%02x)\n", tcph->th_flags);
-            return 0;  // Or keep looping if you want to wait for an actual RST
+            return 1;  // ✅ Valid RST from expected source
         }
-        
-        gettimeofday(timestamp, NULL);
-        syslog(LOG_INFO, "Captured RST pkt\n");
-        return 1;
     }
 
-    syslog(LOG_INFO, "Catched nothing before timeout\n");
+    syslog(LOG_WARNING, "Catched nothing before timeout\n");
     return 0;
     
 }
 
+void *capture_thread_function(void *p){
+    syslog(LOG_INFO, "Capturing 1st set of rst...\n");
+    MultithreadingArgs *args = (MultithreadingArgs*)p;
 
-// ✅ Then thread function
-void *capture_rst_wrapper(void *args_ptr) {
-    struct rst_capture_args *args = (struct rst_capture_args *)args_ptr;
-    *(args->result_ptr) = capture_rst_pkt(args->socket, args->timestamp);
-    return NULL;
+    int tcp_raw_socket = args->tcp_raw_socket;
+
+    pthread_mutex_lock(&lock);
+    ready = 1;
+    pthread_cond_signal(&cond);
+    pthread_mutex_unlock(&lock);
+
+    int rst1 = capture_rst_pkt(args->tcp_raw_socket, args->low_rst1_time, args->dest_addr.sin_addr.s_addr, args->src_addr.sin_port);
+
+    int rst2 = capture_rst_pkt(args->tcp_raw_socket, args->low_rst2_time, args->dest_addr.sin_addr.s_addr, args->src_addr.sin_port);
+
+    if(!rst1 | !rst2){
+        syslog(LOG_PERROR, "Captured non rst pkt or timed out");
+        printf("Failed to detect due to insufficient information.\n");
+        exit(1);
+    }
+
+    syslog(LOG_INFO, "Waiting for inter-measure time...\n");
+    sleep(15);
+
+    syslog(LOG_INFO, "Capturing 2nd set of rst...\n");
+    pthread_mutex_lock(&lock);
+    ready = 2;
+    pthread_cond_signal(&cond);
+    pthread_mutex_unlock(&lock);
+
+    int rst3 = capture_rst_pkt(args->tcp_raw_socket, args->high_rst1_time, args->dest_addr.sin_addr.s_addr, args->src_addr.sin_port);
+
+    int rst4 = capture_rst_pkt(args->tcp_raw_socket, args->high_rst2_time, args->dest_addr.sin_addr.s_addr, args->src_addr.sin_port);
+
+    if(!rst3 | !rst4){
+        syslog(LOG_PERROR, "Captured non rst pkt or timed out");
+        printf("Failed to detect due to insufficient information.\n");
+        exit(1);
+    }
+
+}
+
+void *send_thread_function(void *p){
+    MultithreadingArgs *args = (MultithreadingArgs*)p;
+
+    pthread_mutex_lock(&lock);
+    while(ready < 1){
+        pthread_cond_wait(&cond, &lock);
+    }
+    pthread_mutex_unlock(&lock);
+
+    send_syn_pkt(args->tcp_raw_socket, &(args->src_addr), &(args->dest_addr), args->port_x);
+    send_udp_train(args->udp_socket, args->udp_res, 0, args->config);
+    send_syn_pkt(args->tcp_raw_socket, &(args->src_addr), &(args->dest_addr), args->port_y);
+
+    pthread_mutex_lock(&lock);
+    while(ready < 2){
+        pthread_cond_wait(&cond, &lock);
+    }
+    pthread_mutex_unlock(&lock);
+
+    send_syn_pkt(args->tcp_raw_socket, &(args->src_addr), &(args->dest_addr), args->port_x);
+    send_udp_train(args->udp_socket, args->udp_res, 1, args->config);
+    send_syn_pkt(args->tcp_raw_socket, &(args->src_addr), &(args->dest_addr), args->port_y);
 }
 
 int main(int argc, char* argv[]){
@@ -479,67 +572,53 @@ int main(int argc, char* argv[]){
         exit(1);
     }
 
-    pthread_t capture_thread; // ✅ Declare the thread variable
-
     struct addrinfo *udp_res;
     udp_socket = set_udp_socket(config.server_ip, config.udp_src_port, config.udp_dest_port, &udp_res, &config);
 
-    int rst1;
-
     struct timeval low_rst1_time, low_rst2_time, high_rst1_time, high_rst2_time;
-    
-    struct rst_capture_args args1 = {
-        .socket = tcp_raw_socket,
-        .timestamp = &low_rst1_time,
-        .result_ptr = &rst1
-    };
-    
-    
-    
-    // ✅ Start capture thread
-    if (pthread_create(&capture_thread, NULL, capture_rst_wrapper, &args1) != 0) {
-        perror("pthread_create failed");
-        exit(1);
-    }
-    
-    // ✅ Send SYN while the thread is capturing
-    send_syn_pkt(tcp_raw_socket, &src_addr, &dest_addr, port_x);
-    send_syn_pkt(tcp_raw_socket, &src_addr, &dest_addr, port_y);
-    
-    // ✅ Wait for capture thread to finish
+
+    //Multithreading
+    pthread_t capture_thread;
+    pthread_t send_thread;
+
+    MultithreadingArgs args;
+    args.tcp_raw_socket = tcp_raw_socket;
+    args.udp_socket = udp_socket;
+    args.src_addr = src_addr;
+    args.dest_addr = dest_addr;
+    args.udp_res = udp_res;
+    args.port_x = port_x;
+    args.port_y = port_y;
+    args.config = &config;
+    args.low_rst1_time = &low_rst1_time;
+    args.low_rst2_time = &low_rst2_time;
+    args.high_rst1_time = &high_rst1_time;
+    args.high_rst2_time = &high_rst2_time;
+
+    pthread_create(&capture_thread, NULL, capture_thread_function, &args);
+    pthread_create(&send_thread, NULL, send_thread_function,&args);
+
+
     pthread_join(capture_thread, NULL);
-    
-    // ✅ Check result
-    if (rst1) {
-        printf("Captured RST at time: %ld.%06ld\n", low_rst1_time.tv_sec, low_rst1_time.tv_usec);
-    } else {
-        printf("No RST captured.\n");
+    pthread_join(send_thread, NULL);
+
+    pthread_mutex_destroy(&lock);
+    pthread_cond_destroy(&cond);
+
+    long low_entropy_time = time_diff(low_rst1_time,  low_rst2_time);
+    long high_entropy_time = time_diff(high_rst1_time, high_rst2_time);
+    long diff = labs(high_entropy_time - low_entropy_time);
+
+    syslog(LOG_INFO, "Low entropy time: %ld", low_entropy_time);
+    syslog(LOG_INFO, "High entropy time: %ld", high_entropy_time);
+    syslog(LOG_INFO, "Difference: %ld", diff);
+
+    if(diff/1000 > 100){
+        printf("Compression detected!\n"); 
     }
-
-    // send_syn_pkt(tcp_raw_socket, &src_addr, &dest_addr, port_x); //thread1
-    // send_udp_train(udp_socket, udp_res, 0, &config); //Low entropy
-    // send_syn_pkt(tcp_raw_socket, &src_addr, &dest_addr, port_y); 
-
-    // sleep(15);
-
-    // send_syn_pkt(tcp_raw_socket, &src_addr, &dest_addr, port_x);
-    // send_udp_train(udp_socket, udp_res, 1, &config); //High entropy
-    // send_syn_pkt(tcp_raw_socket, &src_addr, &dest_addr, port_y);
-    
-    // int rst1 = capture_rst_pkt(tcp_raw_socket, &low_rst1_time); //thread 2
-    // int rst2 = capture_rst_pkt(tcp_raw_socket, &low_rst2_time);
-    // int rst3 = capture_rst_pkt(tcp_raw_socket, &high_rst1_time);
-    // int rst4 = capture_rst_pkt(tcp_raw_socket, &high_rst2_time);
-
-
-    //if(!rst1 | !rst2 | !rst3 | !rst4)
-    
-
-    //long low_entropy_time = time_diff(&low_rst1_time,  &low_rst2_time)
-    //long high_entropy_time = time_diff(&high_rst1_time, &high_rst2_time)
-    //long diff = high_entropy_time - low_entropy_time;
-    //if(diff > 100){ printf("Compression detected!\n") }
-    //else{ printf("No Compression detected.\n") }
+    else{ 
+        printf("No Compression detected.\n");
+    }
 
     close(udp_socket);
     close(tcp_raw_socket);
