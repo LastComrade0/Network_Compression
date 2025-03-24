@@ -516,15 +516,6 @@ int main(int argc, char* argv[]){
 
     openlog("Server", LOG_PID | LOG_CONS | LOG_PERROR, LOG_USER);
 
-    char* src_ip = "192.168.132.210";
-    char* dest_ip = "192.168.132.211";
-
-    int port_x = atoi("9999");
-    int port_y = atoi("8888");
-
-    int tcp_raw_socket = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
-    int udp_socket;
-
     Config config;
     char json_buffer[2048];
 
@@ -536,6 +527,17 @@ int main(int argc, char* argv[]){
     syslog(LOG_INFO, "Loading configuration file...\n\n");
 
     parse_configfile(argv[1], &config, json_buffer);
+
+    char* src_ip = "192.168.132.210";
+    char* dest_ip = config.server_ip;
+
+    int port_x = atoi(config.tcp_head_syn_dest_port);
+    int port_y = atoi(config.tcp_tail_syn_dest_port);
+
+    int tcp_raw_socket = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
+    int udp_socket;
+
+    
 
     if(tcp_raw_socket < 0){
         syslog(LOG_ERR, "Unable to create TCP raw socket: %d", tcp_raw_socket);
