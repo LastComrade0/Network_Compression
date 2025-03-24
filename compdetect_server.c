@@ -466,7 +466,7 @@ int main(int argc, char *argv[]){
 
     syslog(LOG_INFO, "High entropy time: %ld\n", high_entropy);
 
-    long delta_t = high_entropy - low_entropy;
+    long delta_t = labs(high_entropy - low_entropy);
 
     syslog(LOG_INFO, "Post probing tcp to send result\n\n");
 
