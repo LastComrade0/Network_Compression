@@ -275,7 +275,7 @@ int recv_udp_pkt(int udp_socket, Config *config){
     do{
 
         
-        ssize_t receiver = recvfrom(udp_socket, buffer, config->packet_count, 0,  (struct sockaddr*)&client_info, &addr_len);
+        ssize_t receiver = recvfrom(udp_socket, buffer, config->packet_size, 0,  (struct sockaddr*)&client_info, &addr_len);
         gettimeofday(&finish, NULL);
         // if(receiver <= 0){
         //     break;

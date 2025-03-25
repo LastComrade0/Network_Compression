@@ -33,15 +33,11 @@
 #define OPT_SIZE 20
 #define DATAGRAM_LEN 4096
 
-pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
-int ready = 0;
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER; //Lock
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER; //Condition
+int ready = 0; //Procedure for low and high entropy train
 
-struct rst_capture_args{
-    int socket;
-    struct timeval *timestamp;
-    int *result_ptr;
-};
+
 
 struct pseudo_header{ //For checksum
     uint32_t src_addr;
@@ -51,19 +47,19 @@ struct pseudo_header{ //For checksum
     uint32_t tcp_length;
 };
 
-typedef struct{
+typedef struct{ //Struct for parsed json data
     char src_ip[16];
     char dest_ip[16];
     char udp_src_port[6];
     char udp_dest_port[6];
-    char tcp_head_syn_dest_port[6];
-    char tcp_tail_syn_dest_port[6];
+    char tcp_head_syn_dest_port[6]; //For part 2
+    char tcp_tail_syn_dest_port[6]; //For part 2
     char tcp_port_pre_probe[6]; //For part 1
     char tcp_port_post_probe[6]; //For part 1
     int packet_size;
     int inter_time;
     int packet_count;
-    int udp_ttl;
+    int udp_ttl; //For part 2
 
     
 } Config;
