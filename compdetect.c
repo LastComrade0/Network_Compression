@@ -52,7 +52,8 @@ struct pseudo_header{ //For checksum
 };
 
 typedef struct{
-    char server_ip[16];
+    char src_ip[16];
+    char dest_ip[16];
     char udp_src_port[6];
     char udp_dest_port[6];
     char tcp_head_syn_dest_port[6];
@@ -104,7 +105,8 @@ void parse_configfile(char *json_file, Config *config, char *json_buffer){
         exit(1);
     }
     
-    strcpy(config->server_ip, cJSON_GetObjectItem(json_parser, "server_ip")->valuestring);
+    strcpy(config->src_ip, cJSON_GetObjectItem(json_parser, "src_ip")->valuestring);
+    strcpy(config->dest_ip, cJSON_GetObjectItem(json_parser, "dest_ip")->valuestring);
     strcpy(config->udp_src_port, cJSON_GetObjectItem(json_parser, "udp_src_port")->valuestring);
     strcpy(config->udp_dest_port, cJSON_GetObjectItem(json_parser, "udp_dest_port")->valuestring);
     strcpy(config->tcp_head_syn_dest_port, cJSON_GetObjectItem(json_parser, "tcp_head_syn_dest_port")->valuestring);
@@ -117,9 +119,10 @@ void parse_configfile(char *json_file, Config *config, char *json_buffer){
     config->udp_ttl = cJSON_GetObjectItem(json_parser, "udp_ttl")->valueint;
 
     cJSON_Delete(json_parser);
-
+    
     syslog(LOG_INFO, "Successfully parsed JSON to struct\n\n");
-    syslog(LOG_INFO, "Server ip: %s\n", config->server_ip);
+    syslog(LOG_INFO, "Src ip: %s\n", config->src_ip);
+    syslog(LOG_INFO, "Dest ip: %s\n", config->dest_ip);
     syslog(LOG_INFO, "UDP src port: %s\n", config->udp_src_port);
     syslog(LOG_INFO, "UDP dest port: %s\n", config->udp_dest_port);
     syslog(LOG_INFO, "TCP head syn dest port: %s\n", config->tcp_head_syn_dest_port);
@@ -191,7 +194,7 @@ void send_syn_pkt(int socket, struct sockaddr_in *src, struct sockaddr_in *dest,
     tcpheader->ack = 0;
     tcpheader->urg = 0;
     tcpheader->check = 0;
-    tcpheader->th_win = htons(65535); //Max allowed window size
+    tcpheader->th_win = htons(500); //Max allowed window size
     tcpheader->urg_ptr = 0;
 
     //TCP pseudo header for checksum
@@ -227,10 +230,6 @@ void send_syn_pkt(int socket, struct sockaddr_in *src, struct sockaddr_in *dest,
     iph->check = check_sum((const char*) datagram, iph->tot_len);
     
 
-    // printf("Sending SYN to IP: %s, port: %d\n",
-    //     inet_ntoa(dest->sin_addr),
-    //     ntohs(dest->sin_port));
-
     
     int one = 1;
     const int *val = &one;
@@ -240,16 +239,12 @@ void send_syn_pkt(int socket, struct sockaddr_in *src, struct sockaddr_in *dest,
     }
 
 
-    sleep(1);
     int send_syn = sendto(socket, datagram, iph->tot_len, 0, (struct sockaddr *) dest, sizeof(struct sockaddr));
     if(send_syn <= 0){
         syslog(LOG_PERROR, "Error: Unable to send syn! %d\n", send_syn);
         exit(1);
     }
-    // else{
-    //     syslog(LOG_INFO, "Sucessfully sent one SYN packet.\n");
-    // }
-
+    
 }
 
 int set_udp_socket(const char *application_ip, const char *src_port, const char* dest_port, struct addrinfo **res, Config *config){
@@ -468,7 +463,7 @@ void *capture_thread_function(void *p){
     }
 
     syslog(LOG_INFO, "Waiting for inter-measure time...\n");
-    sleep(15);
+    sleep(args->config->inter_time);
 
     syslog(LOG_INFO, "Capturing 2nd set of rst...\n");
     pthread_mutex_lock(&lock);
@@ -528,8 +523,8 @@ int main(int argc, char* argv[]){
 
     parse_configfile(argv[1], &config, json_buffer);
 
-    char* src_ip = "192.168.56.101";
-    char* dest_ip = config.server_ip;
+    char* src_ip = config.src_ip;
+    char* dest_ip = config.dest_ip;
 
     int port_x = atoi(config.tcp_head_syn_dest_port);
     int port_y = atoi(config.tcp_tail_syn_dest_port);
@@ -554,13 +549,12 @@ int main(int argc, char* argv[]){
         syslog(LOG_INFO, "Dest ip configuration failed");
         return 1;
     }
-    //dest_addr.sin_addr.s_addr = inet_addr(dest_ip);
-    //inet_pton(AF_INET, application_ip, &sin.sin_addr);
+    
 
     struct sockaddr_in src_addr;
     memset(&src_addr, 0, sizeof(src_addr));
     src_addr.sin_family = AF_INET;
-    src_addr.sin_port = htons(7777);//rand() % 65535
+    src_addr.sin_port = htons(atoi(config.tcp_port_pre_probe));//rand() % 65535
     int set_src_addr = inet_pton(AF_INET, src_ip, &src_addr.sin_addr);
     if(set_src_addr != 1){
         syslog(LOG_INFO, "Src ip configuration failed");
@@ -575,7 +569,7 @@ int main(int argc, char* argv[]){
     }
 
     struct addrinfo *udp_res;
-    udp_socket = set_udp_socket(config.server_ip, config.udp_src_port, config.udp_dest_port, &udp_res, &config);
+    udp_socket = set_udp_socket(config.dest_ip, config.udp_src_port, config.udp_dest_port, &udp_res, &config);
 
     struct timeval low_rst1_time, low_rst2_time, high_rst1_time, high_rst2_time;
 
@@ -600,7 +594,8 @@ int main(int argc, char* argv[]){
     pthread_create(&capture_thread, NULL, capture_thread_function, &args);
     pthread_create(&send_thread, NULL, send_thread_function,&args);
 
-
+//dest_addr.sin_addr.s_addr = inet_addr(dest_ip);
+    //inet_pton(AF_INET, application_ip, &sin.sin_addr);
     pthread_join(capture_thread, NULL);
     pthread_join(send_thread, NULL);
 

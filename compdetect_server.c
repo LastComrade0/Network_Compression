@@ -19,7 +19,8 @@
 #define RECV_BUFFER 16777216
 
 typedef struct{
-    char server_ip[16];
+    char src_ip[16];
+    char dest_ip[16];
     char udp_src_port[6];
     char udp_dest_port[6];
     char tcp_head_syn_dest_port[6];
@@ -42,7 +43,8 @@ void parse_configfile(const char *json_buffer, Config *config){
         exit(1);
     }
 
-    strcpy(config->server_ip, cJSON_GetObjectItem(json_parser, "server_ip")->valuestring);
+    strcpy(config->src_ip, cJSON_GetObjectItem(json_parser, "src_ip")->valuestring);
+    strcpy(config->dest_ip, cJSON_GetObjectItem(json_parser, "dest_ip")->valuestring);
     strcpy(config->udp_src_port, cJSON_GetObjectItem(json_parser, "udp_src_port")->valuestring);
     strcpy(config->udp_dest_port, cJSON_GetObjectItem(json_parser, "udp_dest_port")->valuestring);
     strcpy(config->tcp_head_syn_dest_port, cJSON_GetObjectItem(json_parser, "tcp_head_syn_dest_port")->valuestring);
@@ -56,7 +58,8 @@ void parse_configfile(const char *json_buffer, Config *config){
     cJSON_Delete(json_parser);
 
     syslog(LOG_INFO, "Successfully parsed JSON to struct\n\n");
-    syslog(LOG_INFO, "Server ip: %s\n", config->server_ip);
+    syslog(LOG_INFO, "Src ip: %s\n", config->src_ip);
+    syslog(LOG_INFO, "Dest ip: %s\n", config->dest_ip);
     syslog(LOG_INFO, "UDP src port: %s\n", config->udp_src_port);
     syslog(LOG_INFO, "UDP dest port: %s\n", config->udp_dest_port);
     syslog(LOG_INFO, "TCP head syn dest port: %s\n", config->tcp_head_syn_dest_port);

@@ -17,7 +17,8 @@
 #define ID_EXTRACT sizeof(uint16_t)
 
 typedef struct{
-    char server_ip[16];
+    char src_ip[16];
+    char dest_ip[16];
     char udp_src_port[6];
     char udp_dest_port[6];
     char tcp_head_syn_dest_port[6];
@@ -53,7 +54,8 @@ void parse_configfile(char *json_file, Config *config, char *json_buffer){
         exit(1);
     }
     
-    strcpy(config->server_ip, cJSON_GetObjectItem(json_parser, "server_ip")->valuestring);
+
+    strcpy(config->dest_ip, cJSON_GetObjectItem(json_parser, "dest_ip")->valuestring);
     strcpy(config->udp_src_port, cJSON_GetObjectItem(json_parser, "udp_src_port")->valuestring);
     strcpy(config->udp_dest_port, cJSON_GetObjectItem(json_parser, "udp_dest_port")->valuestring);
     strcpy(config->tcp_head_syn_dest_port, cJSON_GetObjectItem(json_parser, "tcp_head_syn_dest_port")->valuestring);
@@ -67,7 +69,7 @@ void parse_configfile(char *json_file, Config *config, char *json_buffer){
     cJSON_Delete(json_parser);
 
     syslog(LOG_INFO, "Successfully parsed JSON to struct\n\n");
-    syslog(LOG_INFO, "Server ip: %s\n", config->server_ip);
+    syslog(LOG_INFO, "Dest ip: %s\n", config->dest_ip);
     syslog(LOG_INFO, "UDP src port: %s\n", config->udp_src_port);
     syslog(LOG_INFO, "UDP dest port: %s\n", config->udp_dest_port);
     syslog(LOG_INFO, "TCP head syn dest port: %s\n", config->tcp_head_syn_dest_port);
@@ -80,7 +82,7 @@ void parse_configfile(char *json_file, Config *config, char *json_buffer){
 
 }
 
-int client_tcp_pre_probing(const char *server_ip, const char *server_port, char *json_buffer){
+int client_tcp_pre_probing(const char *dest_ip, const char *server_port, char *json_buffer){
     syslog(LOG_INFO, "TCP pre probing\n");
     int tcp_socket;
     struct addrinfo hint, *res;
@@ -95,7 +97,7 @@ int client_tcp_pre_probing(const char *server_ip, const char *server_port, char 
     hint.ai_family = AF_INET;
     hint.ai_socktype = SOCK_STREAM;
 
-    addr_info = getaddrinfo(server_ip, server_port, &hint, &res);
+    addr_info = getaddrinfo(dest_ip, server_port, &hint, &res);
 
     if(addr_info != 0){
         fprintf(stderr, "Get address info error %s\n", gai_strerror(addr_info));
@@ -135,7 +137,7 @@ int client_tcp_pre_probing(const char *server_ip, const char *server_port, char 
 
 }
 
-int client_udp_probing(const char *server_ip, const char *src_port, const char* dest_port, struct addrinfo **res){
+int client_udp_probing(const char *dest_ip, const char *src_port, const char* dest_port, struct addrinfo **res){
     syslog(LOG_INFO, "UDP probing\n");
 
     struct addrinfo hints;
@@ -148,7 +150,7 @@ int client_udp_probing(const char *server_ip, const char *src_port, const char* 
     hints.ai_socktype = SOCK_DGRAM;
 
     //Resolve destination address
-    addr_info = getaddrinfo(server_ip, dest_port, &hints, res);
+    addr_info = getaddrinfo(dest_ip, dest_port, &hints, res);
 
     if(addr_info == -1){
         fprintf(stderr, "Addr_info error %s\n", gai_strerror(addr_info));
@@ -262,7 +264,7 @@ int send_udp_pkt(int udp_socket, struct addrinfo *server_info, int entropy_type,
     }
 }
 
-int client_tcp_post_probing(const char *server_ip, const char *server_port){
+int client_tcp_post_probing(const char *dest_ip, const char *server_port){
     syslog(LOG_INFO, "TCP post probing\n");
     int tcp_socket;
     struct addrinfo hint, *res;
@@ -276,7 +278,7 @@ int client_tcp_post_probing(const char *server_ip, const char *server_port){
     hint.ai_family = AF_INET;
     hint.ai_socktype = SOCK_STREAM;
 
-    addr_info = getaddrinfo(server_ip, server_port, &hint, &res);
+    addr_info = getaddrinfo(dest_ip, server_port, &hint, &res);
 
     if(addr_info != 0){
         fprintf(stderr, "Get address info error %s\n", gai_strerror(addr_info));
@@ -347,14 +349,14 @@ int main(int argc, char *argv[]){
     syslog(LOG_INFO, "Json buffer successfully passed on\n\n");
     syslog(LOG_INFO, "%s\n", json_buffer);
     
-    tcp_socket_pre_probe = client_tcp_pre_probing(config.server_ip, config.tcp_port_pre_probe, json_buffer);
+    tcp_socket_pre_probe = client_tcp_pre_probing(config.dest_ip, config.tcp_port_pre_probe, json_buffer);
     
     close(tcp_socket_pre_probe);
 
     sleep(1);
 
     struct addrinfo *udp_res;
-    udp_socket = client_udp_probing(config.server_ip, config.udp_src_port, config.udp_dest_port, &udp_res);
+    udp_socket = client_udp_probing(config.dest_ip, config.udp_src_port, config.udp_dest_port, &udp_res);
 
     send_udp_pkt(udp_socket, udp_res, 0, &config);//Send Low entropy
 
@@ -374,7 +376,7 @@ int main(int argc, char *argv[]){
 
     syslog(LOG_INFO, "Client: Reconnecting to server for result (Post-Probing Phase)...\n");
     
-    tcp_socket_post_probe = client_tcp_post_probing(config.server_ip, config.tcp_port_post_probe);
+    tcp_socket_post_probe = client_tcp_post_probing(config.dest_ip, config.tcp_port_post_probe);
 
 
     close(tcp_socket_post_probe);
