@@ -64,7 +64,7 @@ typedef struct{ //Struct for parsed json data
     
 } Config;
 
-typedef struct {
+typedef struct { //Struct for passing parameters in multi threading
     int tcp_raw_socket;
     int udp_socket;
     struct sockaddr_in src_addr;
