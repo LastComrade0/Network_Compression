@@ -92,7 +92,30 @@ In eth1, you see inet parameter starts with `192.168.xxx.xxx`, That is the IPv4 
 
 - Now both client and server will start communicating and wait until client shows either `Compression detected!` or `Compression not detected!`
 
+- You will also see packets captured at wireshark. For sanity check, on client side capture, check the packet no. is at approximately 12000 +- 20 to make sure all UDP packets really did sent successfully(For default 6000 packet each UDP train).
+
+- Sanity check: Look both starting packets and end packets. Look at payload data in wireshark, if there is `0x0000` and `0x176f` on both train, then it is all good.
+
+- Note: It is expected to have some packet loss on server side which wireshark may have only 5500-6000 arrive especially on low entropy packet train. But there should not be mis-captured packets on client as sending side.
+
+## Part 2
+
+- Only boot up client terminal(For ease not to change `src` field on `myconfig`)
+
+- Leave server/destination machine power on ONLY
+
+- In wireshark, click on interface to be captured as the network interface that has inet IPv4 appeared on `ifconfig`. Set capture filter `host 192.168.xxx.xxx and 192.168.xxx.xxx and (tcp or udp)`. 2 hosts are source and destination IP address. You can choose to whether also capture on server/destination for sanity check, but client/source is a must.
+
+- Enter `./compdetect myconfig.JSON`. If terminal says cannot creat UDP or TCP socket, do `sudo ./compdetect myconfig.JSON` and type your password
+
+- The program will run until result `Compression detected!` or `Compression not detected!` comes. There are some occasions that will appear `Not enough information`, that means rst packet is not received or received Non rst packet during TIMEOUT receiving call. Just try again if that happens.
+
+- You will see wireshark captures that has TCP head SYN packet sent to destination, and a RST packet returning from destination which may be right after SYN packet or after 10 +- UDP packet sent. Then, locate the 6000th UDP packet sent on 1st train by locating approximately 6000 - 6010.
+Right after that last UDP packet, you will see TCP SYN packet sent and receives RST packet rightaway. This also applies to 2nd UDP train.
+
+- Sanity check: Look both starting packets and end packets. Look at payload data in wireshark, if there is `0x0000` and `0x176f` on both train, then it is all good.
+
 ## Maintainers
 
 Current maintainers:
-- Sascha Eggenberger ([@saschaeggi](https://www.drupal.org/u/saschaeggi))
+- Jerry Chen ([ychen355@dons.usfca.edu](https://github.com/LastComrade0/Network_Compression))
