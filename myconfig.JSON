@@ -1,6 +1,6 @@
 {   
-    "src_ip" : "192.168.56.101",
-    "dest_ip" : "192.168.56.102",
+    "src_ip" : "192.168.56.102",
+    "dest_ip" : "192.168.56.101",
     "udp_src_port" : "9876",
     "udp_dest_port" : "8765",
     "tcp_head_syn_dest_port" : "9999",
