@@ -508,7 +508,7 @@ int main(int argc, char *argv[]){
     Config config; //Configurations
 
     //Comment out to now showing logging on terminal
-    openlog("Server", LOG_PID | LOG_CONS | LOG_PERROR, LOG_USER);
+    //openlog("Server", LOG_PID | LOG_CONS | LOG_PERROR, LOG_USER);
 
     /*Terminate if no argument for setting this server's TCP pre probe port*/
     if(argc != 2){

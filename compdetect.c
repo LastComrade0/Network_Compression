@@ -645,7 +645,7 @@ void *send_thread_function(void *p){
 int main(int argc, char* argv[]){
 
     //Enable logging print on terminal
-    openlog("Server", LOG_PID | LOG_CONS | LOG_PERROR, LOG_USER);
+    //openlog("Server", LOG_PID | LOG_CONS | LOG_PERROR, LOG_USER);
 
     Config config; //Struct configuration
     char json_buffer[2048]; //Stored JSON text from JSON file

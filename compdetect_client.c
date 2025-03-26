@@ -410,7 +410,7 @@ int main(int argc, char *argv[]){
     char json_buffer[2048]; //Json text parsed buffer
 
     //Comment out to now showing logging on terminal
-    openlog("Server", LOG_PID | LOG_CONS | LOG_PERROR, LOG_USER);
+    //openlog("Server", LOG_PID | LOG_CONS | LOG_PERROR, LOG_USER);
 
     /*Terminate if no argument for JSON file name*/
     if(argc != 2){
