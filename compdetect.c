@@ -764,6 +764,9 @@ int main(int argc, char* argv[]){
     //Close sockets
     close(udp_socket);
     close(tcp_raw_socket);
+
+    closelog(); //Close logging
+
     return 0;
     
 

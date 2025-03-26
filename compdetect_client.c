@@ -12,10 +12,17 @@
 #include <syslog.h>
 #include <cjson/cJSON.h>
 
-#define SERVER_IP "192.168.132.210"  // 192.168.132.210(PC server) or 192.168.64.15(Mac server)
-
 #define ID_EXTRACT sizeof(uint16_t)
 
+/**
+ * @struct Config
+ * @brief Configs parsed and loaded from JSON configuration
+ *
+ * Contains the source address, destination address, UDP source port, UDP destination port,
+ * tcp head syn destination port, tcp tail syn destination port, packet size,
+ * intermeasure time, packet count, and time to live for UDP packet for this program
+ * used in the major setting for address and settings for TCP UDP socket.
+ */
 typedef struct{
     char src_ip[16];
     char dest_ip[16];
@@ -30,9 +37,19 @@ typedef struct{
     int packet_count;
     int udp_ttl;
 
-    
 } Config;
 
+/*
+ * Function: parse_config_fileZ
+ * ----------------------------
+ * Open JSON file and parse to put data onto Config struct
+ *
+ * *json_file: Char pointer for file name
+ * *config: Struct for config to be updated
+ * *json_buffer: Char buffer for copying JSON text from json file to buffer
+ *
+ * returns: None but config struct pointer will be updated
+ */
 void parse_configfile(char *json_file, Config *config, char *json_buffer){
     FILE *file = fopen(json_file, "r");
     if(!file){
@@ -82,6 +99,17 @@ void parse_configfile(char *json_file, Config *config, char *json_buffer){
 
 }
 
+/*
+ * Function: client_pre_probing_tcp
+ * ----------------------------
+ * TCP pre probing for sending json data to server
+ *
+ * *dest_ip: Destination IP
+ * *server_port: Server Port
+ * *json_buffer: Char buffer for copying JSON text from json file to buffer
+ *
+ * returns: None but config struct pointer will be updated
+ */
 int client_tcp_pre_probing(const char *dest_ip, const char *server_port, char *json_buffer){
     syslog(LOG_INFO, "TCP pre probing\n");
     int tcp_socket;
@@ -92,11 +120,12 @@ int client_tcp_pre_probing(const char *dest_ip, const char *server_port, char *j
     char buffer[2048];
     
     
-    memset(&hint, 0, sizeof(hint));
+    memset(&hint, 0, sizeof(hint)); //Fill hint addrinfo all 0
 
-    hint.ai_family = AF_INET;
-    hint.ai_socktype = SOCK_STREAM;
+    hint.ai_family = AF_INET; //Set IPv4
+    hint.ai_socktype = SOCK_STREAM; //Set TCP
 
+    //Prepare server address info
     addr_info = getaddrinfo(dest_ip, server_port, &hint, &res);
 
     if(addr_info != 0){
@@ -104,6 +133,7 @@ int client_tcp_pre_probing(const char *dest_ip, const char *server_port, char *j
         exit(1);
     }
 
+    //Set TCP socket
     tcp_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 
     if(tcp_socket == -1){
@@ -111,6 +141,7 @@ int client_tcp_pre_probing(const char *dest_ip, const char *server_port, char *j
         exit(1);
     }
 
+    //Connect to server
     int connector = connect(tcp_socket, res->ai_addr, res->ai_addrlen);
 
     if(connector == -1){
@@ -119,10 +150,9 @@ int client_tcp_pre_probing(const char *dest_ip, const char *server_port, char *j
     }
 
     //Send message to server
-    //send(tcp_socket, msg, strlen(msg), 0);
-    //memcpy(send_json_buffer, json_buffer, sizeof(json_buffer));
     send(tcp_socket, json_buffer, strlen(json_buffer), 0);
     
+    //Receive server response message
     int bytes_recvd = recv(tcp_socket, buffer, sizeof(buffer) - 1, 0);
 
     if(bytes_recvd > 0){
@@ -130,13 +160,25 @@ int client_tcp_pre_probing(const char *dest_ip, const char *server_port, char *j
         syslog(LOG_INFO, "Received response: %s\n", buffer);
         
     }
-    //close(tcp_socket);
 
-    freeaddrinfo(res);
-    return tcp_socket;
+    freeaddrinfo(res); //Free address info
+    return tcp_socket; //Return TCP socket descriptor
 
 }
 
+/*
+ * Function: server_udp_probing
+ * ----------------------------
+ * UDP probing for setting up UDP socket
+ *
+ * *dest_ip: Destination IP
+ * *src_port: Port for source
+ * *dest_port: Port for destination
+ * **res: Address info resolution
+ * 
+ *
+ * returns: UDP socket file descriptor
+ */
 int client_udp_probing(const char *dest_ip, const char *src_port, const char* dest_port, struct addrinfo **res){
     syslog(LOG_INFO, "UDP probing\n");
 
@@ -157,6 +199,7 @@ int client_udp_probing(const char *dest_ip, const char *src_port, const char* de
         exit(1);
     }
 
+    //Create UDP socket
     udp_socket = socket((*res)->ai_family, (*res)->ai_socktype, (*res)->ai_protocol);
     
     if(udp_socket == -1){
@@ -164,30 +207,45 @@ int client_udp_probing(const char *dest_ip, const char *src_port, const char* de
         exit(1);
     }
 
+    //Set don't fragment
     int dont_fragment = IP_PMTUDISC_DO;
     if(setsockopt(udp_socket, IPPROTO_IP, IP_MTU_DISCOVER, &dont_fragment, sizeof(dont_fragment)) < 0){
         fprintf(stderr, "UDP socket error %s\n", gai_strerror(udp_socket));
         exit(1);
     }
 
-    return udp_socket;
+    return udp_socket; //Return UDP socket descriptor
 }
 
-int send_udp_pkt(int udp_socket, struct addrinfo *server_info, int entropy_type, Config *config){
-    char buffer[config->packet_size];
+/*
+ * Function: send_udp_pkt
+ * ----------------------------
+ * Send udp packet train based on entropy type input
+ *
+ * udp_socket: Socket descriptor for UDP socket
+ * *server_info: Address info for server
+ * entropy_type: Entropy type 0 or 1
+ * config: Configurations
+ *
+ * returns: nothing but should send UDP packet train based on entropy type
+ */
+void send_udp_pkt(int udp_socket, struct addrinfo *server_info, int entropy_type, Config *config){
+    char buffer[config->packet_size]; //Char buffer for sending UDP payload
     int packet_id;
     int packet_sent = 0;
     
+    //Switch case: 0 for low entropy and 1 for high entropy
     switch(entropy_type){
         case 0:
-            memset(buffer, 0, config->packet_size);
+            memset(buffer, 0, config->packet_size); //Fill payload buffer to all 0(low entropy)
 
+            //Loop times based on packet count
             syslog(LOG_INFO, "Sending low entropy train...\n");
             for(int i = 0; i < config->packet_count; i += 1){
                 //printf("Sending packet id: %d\n", i);
-                packet_id = htons(i);
-                memcpy(buffer, &packet_id, ID_EXTRACT);
-                ssize_t sent_udp = sendto(udp_socket, buffer, config->packet_size, 0, server_info->ai_addr, server_info->ai_addrlen);
+                packet_id = htons(i); //Packet ID by i
+                memcpy(buffer, &packet_id, ID_EXTRACT); //Replace 1st 4 bytes of payload to packet ID
+                ssize_t sent_udp = sendto(udp_socket, buffer, config->packet_size, 0, server_info->ai_addr, server_info->ai_addrlen); //Send UDP packet
                 if (sent_udp != config->packet_size) {
                     if (sent_udp < 0) {
                         perror("UDP send error");
@@ -211,6 +269,7 @@ int send_udp_pkt(int udp_socket, struct addrinfo *server_info, int entropy_type,
 
             syslog(LOG_INFO, "Sending high entropy udp packet\n");
             
+            //Open urandom
             int urandom_fd = open("/dev/urandom", O_RDONLY);
 
             if(urandom_fd < 0){
@@ -218,15 +277,14 @@ int send_udp_pkt(int udp_socket, struct addrinfo *server_info, int entropy_type,
                 exit(1);
             }
 
+            //Loop times based on packet count
             for(int i = 0; i < config->packet_count; i += 1){
-                packet_id = htons(i);
-                memcpy(buffer, &packet_id, ID_EXTRACT);
+                packet_id = htons(i); //Packet ID by i
+                memcpy(buffer, &packet_id, ID_EXTRACT); //Replace 1st 4 bytes of payload to packet ID
 
+                //Copy generated random bytes to buffer starting from 5th char bytes
                 ssize_t urandom_read = read(urandom_fd, buffer + ID_EXTRACT, config->packet_size - ID_EXTRACT);
-                
-                // printf("Current bit: ");
-                
-                // printf("%s\n", buffer);
+
 
                 if(urandom_read < 0){
                     perror("Error opening /dev/urandom");
@@ -234,6 +292,7 @@ int send_udp_pkt(int udp_socket, struct addrinfo *server_info, int entropy_type,
                     exit(1);
                 }
                 
+                //Send UDP packet
                 ssize_t sent_udp = sendto(udp_socket, buffer, config->packet_size, 0, server_info->ai_addr, server_info->ai_addrlen);
                 
                 if (sent_udp != config->packet_size) {
@@ -249,12 +308,11 @@ int send_udp_pkt(int udp_socket, struct addrinfo *server_info, int entropy_type,
                 }
                 
                 
-                //printf("Sent high-entropy packet id: %d\n", i);
             }
 
             syslog(LOG_INFO, "High entropy packet sent: %d\n", packet_sent);
 
-            close(urandom_fd);
+            close(urandom_fd); //Close urandom read
 
             break;
 
@@ -264,6 +322,16 @@ int send_udp_pkt(int udp_socket, struct addrinfo *server_info, int entropy_type,
     }
 }
 
+/*
+ * Function: client_post_probing_tcp
+ * ----------------------------
+ * Sends TCP request for server to send back result
+ * 
+ * dest_ip: Destination IP
+ * server_port: TCP port for server
+ *
+ * returns: TCP post probe socket descriptor
+ */
 int client_tcp_post_probing(const char *dest_ip, const char *server_port){
     syslog(LOG_INFO, "TCP post probing\n");
     int tcp_socket;
@@ -273,11 +341,12 @@ int client_tcp_post_probing(const char *dest_ip, const char *server_port){
     char buffer[1024];
     
     
-    memset(&hint, 0, sizeof(hint));
+    memset(&hint, 0, sizeof(hint)); //Fill hint addrinfo all 0
 
-    hint.ai_family = AF_INET;
-    hint.ai_socktype = SOCK_STREAM;
+    hint.ai_family = AF_INET; //Set IPv4
+    hint.ai_socktype = SOCK_STREAM; //Set TCP
 
+    //Prepare server address info
     addr_info = getaddrinfo(dest_ip, server_port, &hint, &res);
 
     if(addr_info != 0){
@@ -285,6 +354,7 @@ int client_tcp_post_probing(const char *dest_ip, const char *server_port){
         exit(1);
     }
 
+    //Set TCP socket
     tcp_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 
     if(tcp_socket == -1){
@@ -292,6 +362,7 @@ int client_tcp_post_probing(const char *dest_ip, const char *server_port){
         exit(1);
     }
 
+    /*While loop until connection established*/
     while(1){
         int connector = connect(tcp_socket, res->ai_addr, res->ai_addrlen);
 
@@ -310,9 +381,10 @@ int client_tcp_post_probing(const char *dest_ip, const char *server_port){
         }
     }
     
-
+    //Send message to server
     send(tcp_socket, msg, strlen(msg), 0);
     
+    //Receive reply from server
     int bytes_recvd = recv(tcp_socket, buffer, sizeof(buffer) - 1, 0);
 
     if(bytes_recvd > 0){
@@ -322,19 +394,25 @@ int client_tcp_post_probing(const char *dest_ip, const char *server_port){
     }
     //close(tcp_socket);
 
-    freeaddrinfo(res);
-    return tcp_socket;
+    freeaddrinfo(res); //Free address info
+    return tcp_socket; //Return TCP post probe socket descriptor
 }
 
-
+/*
+ * main - Starting Client.
+ *        Sets up TCP pre probing socket and UDP sockets, parses received json text from 
+ *        JSON file, send UDP packet train, set up TCP post probing, get results from server
+ */
 int main(int argc, char *argv[]){
-    int tcp_socket_pre_probe, tcp_socket_post_probe;
-    int udp_socket;
-    Config config;
-    char json_buffer[2048];
+    int tcp_socket_pre_probe, tcp_socket_post_probe; //Socket descriptors for pre/post TCP socket
+    int udp_socket; //Set Socket descriptor for UDP socket
+    Config config; //Config struct 
+    char json_buffer[2048]; //Json text parsed buffer
 
+    //Comment out to now showing logging on terminal
     openlog("Server", LOG_PID | LOG_CONS | LOG_PERROR, LOG_USER);
 
+    /*Terminate if no argument for JSON file name*/
     if(argc != 2){
         fprintf(stderr, "Usage: %s <config_file>\n", argv[0]);
         exit(1);
@@ -342,6 +420,7 @@ int main(int argc, char *argv[]){
 
     syslog(LOG_INFO, "Loading configuration file...\n\n");
 
+    //Parse read json buffer text to config struct
     parse_configfile(argv[1], &config, json_buffer);
 
     syslog(LOG_INFO, "Client\n\n");
@@ -349,15 +428,18 @@ int main(int argc, char *argv[]){
     syslog(LOG_INFO, "Json buffer successfully passed on\n\n");
     syslog(LOG_INFO, "%s\n", json_buffer);
     
+    //Set up pre probing TCP, sending JSON configuration to server
     tcp_socket_pre_probe = client_tcp_pre_probing(config.dest_ip, config.tcp_port_pre_probe, json_buffer);
     
     close(tcp_socket_pre_probe);
 
-    sleep(1);
+    sleep(1);//Static slight wait for server setting up UDP port
 
     struct addrinfo *udp_res;
+    //Set up UDP socket 
     udp_socket = client_udp_probing(config.dest_ip, config.udp_src_port, config.udp_dest_port, &udp_res);
 
+    //Send low entropy UDP packet train function
     send_udp_pkt(udp_socket, udp_res, 0, &config);//Send Low entropy
 
     syslog(LOG_INFO, "Done sending low entropy UDP packet train\n");
@@ -365,21 +447,22 @@ int main(int argc, char *argv[]){
 
     sleep(config.inter_time + 12);
 
+    //Send low entropy UDP packet train function
     send_udp_pkt(udp_socket, udp_res, 1, &config);//Send High entropy
 
-    freeaddrinfo(udp_res);
+    freeaddrinfo(udp_res); //Free address info
 
-    close(udp_socket);
+    close(udp_socket); //Close UDP socket
 
     syslog(LOG_INFO, "Done sending high entropy UDP packet train\n");
     syslog(LOG_INFO, "Wait...\n\n");
 
     syslog(LOG_INFO, "Client: Reconnecting to server for result (Post-Probing Phase)...\n");
     
+    //Set up post probing TCP, receives result from server
     tcp_socket_post_probe = client_tcp_post_probing(config.dest_ip, config.tcp_port_post_probe);
 
-
-    close(tcp_socket_post_probe);
+    close(tcp_socket_post_probe); //Close TCP post probe socket
     
 
     return 0;
