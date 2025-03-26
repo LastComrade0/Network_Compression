@@ -304,13 +304,14 @@ void send_syn_pkt(int socket, struct sockaddr_in *src, struct sockaddr_in *dest,
     const int *val = &one;
     int set_HDRINCL = setsockopt(socket, IPPROTO_IP, IP_HDRINCL, val, sizeof(one)); //Set option for IP being self assigned
     if(set_HDRINCL < 0){
-        syslog(LOG_INFO, "Warning: Unable to set HDRINCL!\n");
+        fprintf(stderr, "Unable to set HDRINCL %s\n", gai_strerror(set_HDRINCL));
+        exit(1);
     }
 
 
     int send_syn = sendto(socket, datagram, iph->tot_len, 0, (struct sockaddr *) dest, sizeof(struct sockaddr)); //Send SYN packet
     if(send_syn <= 0){
-        syslog(LOG_PERROR, "Error: Unable to send syn! %d\n", send_syn);
+        fprintf(stderr, "Error: Unable to send syn %s\n", gai_strerror(send_syn));
         exit(1);
     }
     
@@ -384,25 +385,28 @@ int set_udp_socket(const char *application_ip, const char *src_port, const char*
  * Send UDP packet train given size from configuration
  *
  * upd_socket:   Head rst received time stamp 
- * end:     Sequence number used to identify the probe
+ * server_info: Destination(server) address info
+ * entropy_type: 0 for sending low entropy and 1 for high entropy
+ * config: Configuration struct
  * 
  * returns: Time interval between 2 rst packets of a train
  */
 void send_udp_train(int udp_socket, struct addrinfo *server_info, int entropy_type, Config *config){
-    char buffer[config->packet_size];
+    char buffer[config->packet_size]; //Char buffer for sending UDP payload
     int packet_id;
     int packet_sent = 0;
     
+    //Switch case: 0 for low entropy and 1 for high entropy
     switch(entropy_type){
         case 0:
-            memset(buffer, 0, config->packet_size);
+            memset(buffer, 0, config->packet_size); //Fill payload buffer to all 0(low entropy)
 
-            //syslog(LOG_INFO, "Sending low entropy train...\n");
+            //Loop times based on packet count
             for(int i = 0; i < config->packet_count; i += 1){
-                //printf("Sending packet id: %d\n", i);
-                packet_id = htons(i);
-                memcpy(buffer, &packet_id, ID_EXTRACT);
-                ssize_t sent_udp = sendto(udp_socket, buffer, config->packet_size, 0, server_info->ai_addr, server_info->ai_addrlen);
+
+                packet_id = htons(i); //Packet ID by i
+                memcpy(buffer, &packet_id, ID_EXTRACT); //Replace 1st 4 bytes of payload to packet ID
+                ssize_t sent_udp = sendto(udp_socket, buffer, config->packet_size, 0, server_info->ai_addr, server_info->ai_addrlen); //Send UDP packet
                 if (sent_udp != config->packet_size) {
                     if (sent_udp < 0) {
                         perror("UDP send error");
@@ -422,8 +426,7 @@ void send_udp_train(int udp_socket, struct addrinfo *server_info, int entropy_ty
 
         case 1:
 
-            //syslog(LOG_INFO, "Sending high entropy udp packet\n");
-            
+            //Open urandom
             int urandom_fd = open("/dev/urandom", O_RDONLY);
 
             if(urandom_fd < 0){
@@ -431,15 +434,14 @@ void send_udp_train(int udp_socket, struct addrinfo *server_info, int entropy_ty
                 exit(1);
             }
 
+            //Loop times based on packet count
             for(int i = 0; i < config->packet_count; i += 1){
-                packet_id = htons(i);
-                memcpy(buffer, &packet_id, ID_EXTRACT);
-
+                packet_id = htons(i); //Packet ID by i
+                memcpy(buffer, &packet_id, ID_EXTRACT); //Replace 1st 4 bytes of payload to packet ID
+                
+                //Copy generated random bytes to buffer starting from 5th char bytes
                 ssize_t urandom_read = read(urandom_fd, buffer + ID_EXTRACT, config->packet_size - ID_EXTRACT);
-                
-                // printf("Current bit: ");
-                
-                // printf("%s\n", buffer);
+  
 
                 if(urandom_read < 0){
                     perror("Error opening /dev/urandom");
@@ -447,6 +449,7 @@ void send_udp_train(int udp_socket, struct addrinfo *server_info, int entropy_ty
                     exit(1);
                 }
                 
+                //Send UDP packet
                 ssize_t sent_udp = sendto(udp_socket, buffer, config->packet_size, 0, server_info->ai_addr, server_info->ai_addrlen);
                 
                 if (sent_udp != config->packet_size) {
@@ -464,7 +467,7 @@ void send_udp_train(int udp_socket, struct addrinfo *server_info, int entropy_ty
                 
             }
 
-            close(urandom_fd);
+            close(urandom_fd); //Close urandom read
 
             break;
 
@@ -634,14 +637,20 @@ void *send_thread_function(void *p){
     send_syn_pkt(args->tcp_raw_socket, &(args->src_addr), &(args->dest_addr), args->port_y);
 }
 
-
+/*
+ * main - Entry point for the program.
+ *        Parses arguments, sets up TCP raw socket and UDP sockets,
+ *        initiate multi threading concurrency for capture rst packet and send rst packet
+ */
 int main(int argc, char* argv[]){
 
+    //Enable logging print on terminal
     openlog("Server", LOG_PID | LOG_CONS | LOG_PERROR, LOG_USER);
 
-    Config config;
-    char json_buffer[2048];
+    Config config; //Struct configuration
+    char json_buffer[2048]; //Stored JSON text from JSON file
 
+    //Terminate if no arguments for JSON file name
     if(argc != 2){
         fprintf(stderr, "Usage: %s <config_file>\n", argv[0]);
         exit(1);
@@ -649,62 +658,68 @@ int main(int argc, char* argv[]){
 
     syslog(LOG_INFO, "Loading configuration file...\n\n");
 
+    //Call parsing
     parse_configfile(argv[1], &config, json_buffer);
 
-    char* src_ip = config.src_ip;
-    char* dest_ip = config.dest_ip;
+    char* src_ip = config.src_ip; //Source IP
+    char* dest_ip = config.dest_ip; //Destination IP
 
-    int port_x = atoi(config.tcp_head_syn_dest_port);
+    int port_x = atoi(config.tcp_head_syn_dest_port); //Convert char port to integer
     int port_y = atoi(config.tcp_tail_syn_dest_port);
 
-    int tcp_raw_socket = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
-    int udp_socket;
+    int tcp_raw_socket = socket(AF_INET, SOCK_RAW, IPPROTO_TCP); //Create TCP raw socket file descriptor
+    int udp_socket; //UDP socket file descriptor
 
-    
 
     if(tcp_raw_socket < 0){
-        syslog(LOG_ERR, "Unable to create TCP raw socket: %d", tcp_raw_socket);
+        fprintf(stderr, "Unable to create TCP raw socket: %s\n", gai_strerror(tcp_raw_socket));
         exit(1);
     }
 
     
-    struct sockaddr_in dest_addr;
-    memset(&dest_addr, 0, sizeof(dest_addr));
+    struct sockaddr_in dest_addr; //Struct for address info of destination address
+    memset(&dest_addr, 0, sizeof(dest_addr)); //Initialize fill 0
+
+    //Set some parameters for destination address
     dest_addr.sin_family = AF_INET;
-    //dest_addr.sin_port = htons(0);
     int set_dest_addr = inet_pton(AF_INET, dest_ip, &dest_addr.sin_addr);
     if(set_dest_addr != 1){
-        syslog(LOG_INFO, "Dest ip configuration failed");
-        return 1;
+        fprintf(stderr, "Dest ip configuration failed: %s\n", gai_strerror(tcp_raw_socket));
+        exit(1);
     }
     
 
-    struct sockaddr_in src_addr;
-    memset(&src_addr, 0, sizeof(src_addr));
+    struct sockaddr_in src_addr; //Struct for address info of source address
+    memset(&src_addr, 0, sizeof(src_addr)); //Initialize fill 0
+
+    //Set some parameters for source address
     src_addr.sin_family = AF_INET;
-    src_addr.sin_port = htons(atoi(config.tcp_port_pre_probe));//rand() % 65535
+    src_addr.sin_port = htons(atoi(config.tcp_port_pre_probe));
     int set_src_addr = inet_pton(AF_INET, src_ip, &src_addr.sin_addr);
     if(set_src_addr != 1){
         syslog(LOG_INFO, "Src ip configuration failed");
         return 1;
     }
 
+    //Set enable self ip TCP option for raw socket
     int self_ip_enable = 1;
-    int set_self_ip = setsockopt(tcp_raw_socket, IPPROTO_IP, IP_HDRINCL, &self_ip_enable, sizeof(self_ip_enable));
+    int set_self_ip = setsockopt(tcp_raw_socket, IPPROTO_IP, IP_HDRINCL, &self_ip_enable, sizeof(self_ip_enable)); 
     if(set_self_ip < 0){
-        syslog(LOG_ERR, "Error setting IP_HDRINCL: Unable to enable self ip header");
+        fprintf(stderr, "Error setting IP_HDRINCL: Unable to enable self ip header: %s\n", gai_strerror(tcp_raw_socket));
         exit(1);
     }
+    
+    struct addrinfo *udp_res; //Struct for UDP address info
+    udp_socket = set_udp_socket(config.dest_ip, config.udp_src_port, config.udp_dest_port, &udp_res, &config); //Create UDP socket file descriptor
 
-    struct addrinfo *udp_res;
-    udp_socket = set_udp_socket(config.dest_ip, config.udp_src_port, config.udp_dest_port, &udp_res, &config);
-
-    struct timeval low_rst1_time, low_rst2_time, high_rst1_time, high_rst2_time;
+    //Struct for time stamps.
+    struct timeval low_rst1_time, low_rst2_time, high_rst1_time, high_rst2_time; 
 
     //Multithreading
-    pthread_t capture_thread;
-    pthread_t send_thread;
+    pthread_t capture_thread; //Capture thread
+    pthread_t send_thread; //Send thread
 
+    //Struct for multi threading for passing data to multi threading functions
     MultithreadingArgs args;
     args.tcp_raw_socket = tcp_raw_socket;
     args.udp_socket = udp_socket;
@@ -719,32 +734,34 @@ int main(int argc, char* argv[]){
     args.high_rst1_time = &high_rst1_time;
     args.high_rst2_time = &high_rst2_time;
 
-    pthread_create(&capture_thread, NULL, capture_thread_function, &args);
-    pthread_create(&send_thread, NULL, send_thread_function,&args);
+    pthread_create(&capture_thread, NULL, capture_thread_function, &args); //Create capture thread 
+    pthread_create(&send_thread, NULL, send_thread_function,&args); //Create send thread
 
-//dest_addr.sin_addr.s_addr = inet_addr(dest_ip);
-    //inet_pton(AF_INET, application_ip, &sin.sin_addr);
+    //Join threads
     pthread_join(capture_thread, NULL);
     pthread_join(send_thread, NULL);
 
+    //Destroy threads after done
     pthread_mutex_destroy(&lock);
     pthread_cond_destroy(&cond);
 
-    long low_entropy_time = time_diff(low_rst1_time,  low_rst2_time);
-    long high_entropy_time = time_diff(high_rst1_time, high_rst2_time);
-    long diff = labs(high_entropy_time - low_entropy_time);
+    long low_entropy_time = time_diff(low_rst1_time,  low_rst2_time); //Low entropy type interval between head rst and tail rst receive time
+    long high_entropy_time = time_diff(high_rst1_time, high_rst2_time); //High entropy type interval between head rst and tail rst receive time
+    long diff = labs(high_entropy_time - low_entropy_time); //Absolute value difference between low and high entropy time
 
     syslog(LOG_INFO, "Low entropy time: %ld", low_entropy_time);
     syslog(LOG_INFO, "High entropy time: %ld", high_entropy_time);
     syslog(LOG_INFO, "Difference: %ld", diff);
 
+    /*If diff > 100ms, compression detected print */
     if(diff/1000 > 100){
         printf("Compression detected!\n"); 
     }
-    else{ 
+    else{ /*Else no compression print*/
         printf("No Compression detected.\n");
     }
 
+    //Close sockets
     close(udp_socket);
     close(tcp_raw_socket);
     return 0;
