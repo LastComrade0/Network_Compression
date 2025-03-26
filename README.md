@@ -14,8 +14,8 @@
 
 This project is to detect when in robust sending HUGE number of UDP packet, the low entropy packets and high entropy packets payload will have similar time. 
 
--Low entropy packets: Static or patterned text such as 0000..., aaaa..., abab..., etc.
--High entropy packets: Payload full of randomized characters a8Tr39Vvs...
+- Low entropy packets: Static or patterned text such as 0000..., aaaa..., abab..., etc.
+- High entropy packets: Payload full of randomized characters a8Tr39Vvs...
 
 If both time difference is less than 100ms threshold, then it means low entropy packets does not have compression when going through router and network. If high entropy time subracting low entropy time has over 100ms threshold, that means there is indeed compression happening on low entropy packets when going through network and router. 
 
@@ -25,15 +25,26 @@ Note: The default test always gives 6000 UDP packet for each train, and each UDP
  
 ## Requirements
 
+### CJSON Library
+
 You need CJson libarary installed and C compiler newer or atleast C11. You also need a Linux Ubuntu or Debian environment and 2 machines having those OS.
 
 **Note**: C11 solves issue for empty declaring pointer struct
+
+### Increase Receive Buffer on OS level
+- You also need to set receiver buffer on server/destination machine to 32 MB\
+`sudo sysctl net.core.rmem_max=33554432`
+
+- If you do not feel save even after you call `setsockopt()` to increase receiving buffer in program, you can also do\
+`sudo sysctl net.core.rmem_default=33554432`
+
+
 
 ## Installation
 
 - install CJSON for parsing your configuration on Ubuntu/Debian OS\
 `sudo apt-get install libcjson-dev`\
-Locate 
+Make sure it is on /usr/include/cJSON/cJSON.h so you can do #include<cjson/cJSON>
 
 
 ### Set Gin as default admin theme
