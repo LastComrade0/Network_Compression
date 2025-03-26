@@ -33,13 +33,21 @@
 #define OPT_SIZE 20
 #define DATAGRAM_LEN 4096
 
-pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER; //Lock
-pthread_cond_t cond = PTHREAD_COND_INITIALIZER; //Condition
-int ready = 0; //Procedure for low and high entropy train
+//Lock, Condition, and procedure for low and high entropy train
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+int ready = 0; 
 
 
-
-struct pseudo_header{ //For checksum
+/**
+ * @struct Pseudo Header
+ * @brief Pseudo header for check sum in TCP layer
+ *
+ * Contains the source address, destination address, reserved field,
+ * protocol, and tcp length
+ * used in the check sum for TCP layer.
+ */
+struct pseudo_header{
     uint32_t src_addr;
     uint32_t dest_addr;
     uint8_t reserved;
@@ -47,7 +55,16 @@ struct pseudo_header{ //For checksum
     uint32_t tcp_length;
 };
 
-typedef struct{ //Struct for parsed json data
+/**
+ * @struct Config
+ * @brief Configs parsed and loaded from JSON configuration
+ *
+ * Contains the source address, destination address, UDP source port, UDP destination port,
+ * tcp head syn destination port, tcp tail syn destination port, packet size,
+ * intermeasure time, packet count, and time to live for UDP packet for this program
+ * used in the major setting for address and settings for TCP UDP socket.
+ */
+typedef struct{ 
     char src_ip[16];
     char dest_ip[16];
     char udp_src_port[6];
@@ -64,7 +81,15 @@ typedef struct{ //Struct for parsed json data
     
 } Config;
 
-typedef struct { //Struct for passing parameters in multi threading
+/**
+ * @struct MultithreadingArgs
+ * @brief Argument struct to pass data when conducting multi threading
+ *
+ * Contains the source address, destination address, port x/y, udp res, config
+ * 4 time stamps(2 for low entropy train and 2 for high entropy train)
+ * used to pass data when conducting multi threading.
+ */
+typedef struct { 
     int tcp_raw_socket;
     int udp_socket;
     struct sockaddr_in src_addr;
@@ -80,6 +105,17 @@ typedef struct { //Struct for passing parameters in multi threading
 
 } MultithreadingArgs;
 
+/*
+ * Function: parse_config_fileZ
+ * ----------------------------
+ * Open JSON file and parse to put data onto Config struct
+ *
+ * *json_file: Char pointer for file name
+ * *config: Struct for config to be updated
+ * *json_buffer: Char buffer for copying JSON text from json file to buffer
+ *
+ * returns: None but config struct pointer will be updated
+ */
 void parse_configfile(char *json_file, Config *config, char *json_buffer){
     FILE *file = fopen(json_file, "r");
     if(!file){
@@ -91,16 +127,18 @@ void parse_configfile(char *json_file, Config *config, char *json_buffer){
     long file_size = ftell(file); //Get size given the last pointer
     fseek(file, 0, SEEK_SET); //Move pointer back to start of file
 
-    fread(json_buffer, 1, file_size, file);
+    fread(json_buffer, 1, file_size, file); //Read file and copy all text to buffer
     json_buffer[file_size] = '\0';
     fclose(file);
 
+    //Parse JSON from read json buffer
     cJSON *json_parser = cJSON_Parse(json_buffer);
     if(!json_parser){
         perror("Error parsing JSON");
         exit(1);
     }
     
+    //Parsed json object to corresponding struct data
     strcpy(config->src_ip, cJSON_GetObjectItem(json_parser, "src_ip")->valuestring);
     strcpy(config->dest_ip, cJSON_GetObjectItem(json_parser, "dest_ip")->valuestring);
     strcpy(config->udp_src_port, cJSON_GetObjectItem(json_parser, "udp_src_port")->valuestring);
@@ -114,7 +152,7 @@ void parse_configfile(char *json_file, Config *config, char *json_buffer){
     config->packet_count = cJSON_GetObjectItem(json_parser, "packet_count")->valueint;
     config->udp_ttl = cJSON_GetObjectItem(json_parser, "udp_ttl")->valueint;
 
-    cJSON_Delete(json_parser);
+    cJSON_Delete(json_parser); //Destroy parse as done parsing
     
     syslog(LOG_INFO, "Successfully parsed JSON to struct\n\n");
     syslog(LOG_INFO, "Src ip: %s\n", config->src_ip);
@@ -132,10 +170,31 @@ void parse_configfile(char *json_file, Config *config, char *json_buffer){
 
 }
 
+/*
+ * Function: time_diff
+ * ---------------------------
+ * Calculate time interval between TCP head syn rst and TCP tail syn rst
+ *
+ * start:   Head rst received time stamp 
+ * end:     Sequence number used to identify the probe
+ * 
+ * returns: Time interval between 2 rst packets of a train
+ */
 long time_diff(struct timeval start, struct timeval end) {
     return ((end.tv_sec - start.tv_sec) * 1000000L) + (end.tv_usec - start.tv_usec);
 }
 
+/*
+ * Function: check_sum
+ * ---------------------------
+ * Check sum for IP header and TCP header
+ *
+ * buffer: Char buffer for pseudogram for TCP or IP
+ * size: Size of buffer for pseudogram
+ * 
+ * returns: Check sum value later to be received by dest and dest will check if 
+ * this value is identical to their calculation
+ */
 unsigned short check_sum(const char *buffer, unsigned size){
     unsigned long sum = 0, i;
     for(i = 0; i < size - 1; i += 2){
@@ -157,15 +216,28 @@ unsigned short check_sum(const char *buffer, unsigned size){
     return ~sum;
 }
 
+/*
+ * Function: send_syn_pkt
+ * ---------------------------
+ * Send TCP syn packet
+ *
+ * socket: Socket fd for TCP raw socket
+ * *src: Source address info
+ * *dest: Destination address info
+ * dest_port: Destination port
+ * 
+ * returns: None but a syn packet should be sent
+ */
 void send_syn_pkt(int socket, struct sockaddr_in *src, struct sockaddr_in *dest, int dest_port){
     char datagram[DATAGRAM_LEN];
 
-    struct iphdr *iph = (struct iphdr*)datagram;
-    struct tcphdr *tcpheader = (struct tcphdr*)(datagram + sizeof(struct iphdr));
-    struct pseudo_header psh;
+    struct iphdr *iph = (struct iphdr*)datagram; //IP header
+    struct tcphdr *tcpheader = (struct tcphdr*)(datagram + sizeof(struct iphdr)); //TCP header
+    struct pseudo_header psh; //Pseudo header for TCP checksum
 
-    memset(datagram, 0, DATAGRAM_LEN);
+    memset(datagram, 0, DATAGRAM_LEN); //Initialize entire datagram buffer to 0
 
+    //Set all relative field for IP header
     iph->ihl = 5;
     iph->version = 4;
     iph->tos = 0;
@@ -178,6 +250,7 @@ void send_syn_pkt(int socket, struct sockaddr_in *src, struct sockaddr_in *dest,
     iph->saddr = src->sin_addr.s_addr;
     iph->daddr = dest->sin_addr.s_addr;
 
+    //Set all relative field for TCP header
     tcpheader->source = src->sin_port; //Arbitrary port 7777
     tcpheader->dest = htons(dest_port); //x or y port
     tcpheader->seq = htonl(rand() % 4294967295);
@@ -199,13 +272,13 @@ void send_syn_pkt(int socket, struct sockaddr_in *src, struct sockaddr_in *dest,
     psh.reserved = 0;
     psh.protocol = IPPROTO_TCP;
     psh.tcp_length = htons(sizeof(struct tcphdr) + OPT_SIZE);
-    int psize =  sizeof(struct pseudo_header) + sizeof(struct tcphdr) + OPT_SIZE;
+    int psize =  sizeof(struct pseudo_header) + sizeof(struct tcphdr) + OPT_SIZE; //Size of pseudo header of sum of pseudo header, TCP header, and opt size
 
     //Fill pseudo packet
-    char *pseudogram = malloc(psize);
-    memcpy(pseudogram, (char*)&psh, sizeof(struct pseudo_header));
-    memcpy(pseudogram + sizeof(struct pseudo_header), tcpheader, sizeof(struct tcphdr) + OPT_SIZE);
-
+    char *pseudogram = malloc(psize); //Char buffer with psize
+    memcpy(pseudogram, (char*)&psh, sizeof(struct pseudo_header)); //Put pseudo header
+    memcpy(pseudogram + sizeof(struct pseudo_header), tcpheader, sizeof(struct tcphdr) + OPT_SIZE); //Put 
+    
     // TCP options are only set in the SYN packet
 	// ---- set mss ----
 	datagram[40] = 0x02;
@@ -222,20 +295,20 @@ void send_syn_pkt(int socket, struct sockaddr_in *src, struct sockaddr_in *dest,
 	pseudogram[36] = 0x04;
 	pseudogram[37] = 0x02;
 
-    tcpheader->th_sum = check_sum((const char*)pseudogram, psize);
-    iph->check = check_sum((const char*) datagram, iph->tot_len);
+    tcpheader->th_sum = check_sum((const char*)pseudogram, psize); //Check sum for TCP header and put it in checksum field
+    iph->check = check_sum((const char*) datagram, iph->tot_len); //Same as TCP check sum
     
 
     
     int one = 1;
     const int *val = &one;
-    int set_HDRINCL = setsockopt(socket, IPPROTO_IP, IP_HDRINCL, val, sizeof(one));
+    int set_HDRINCL = setsockopt(socket, IPPROTO_IP, IP_HDRINCL, val, sizeof(one)); //Set option for IP being self assigned
     if(set_HDRINCL < 0){
         syslog(LOG_INFO, "Warning: Unable to set HDRINCL!\n");
     }
 
 
-    int send_syn = sendto(socket, datagram, iph->tot_len, 0, (struct sockaddr *) dest, sizeof(struct sockaddr));
+    int send_syn = sendto(socket, datagram, iph->tot_len, 0, (struct sockaddr *) dest, sizeof(struct sockaddr)); //Send SYN packet
     if(send_syn <= 0){
         syslog(LOG_PERROR, "Error: Unable to send syn! %d\n", send_syn);
         exit(1);
@@ -243,6 +316,19 @@ void send_syn_pkt(int socket, struct sockaddr_in *src, struct sockaddr_in *dest,
     
 }
 
+/*
+ * Function: set_udp_socket
+ * ---------------------------
+ * Setting up UDP socket
+ *
+ * *application_ip: Source ip as application side
+ * *src_port: Source port
+ * *dest_port: Destination port
+ * addr_info: Address info for destination
+ * config: Configurations
+ * 
+ * returns: File descriptor for UDP socket
+ */
 int set_udp_socket(const char *application_ip, const char *src_port, const char* dest_port, struct addrinfo **res, Config *config){
 
     syslog(LOG_INFO, "Setting UDP socket");
@@ -264,6 +350,7 @@ int set_udp_socket(const char *application_ip, const char *src_port, const char*
         exit(1);
     }
 
+    //Create udp socket
     udp_socket = socket((*res)->ai_family, (*res)->ai_socktype, (*res)->ai_protocol);
     
     if(udp_socket == -1){
@@ -271,12 +358,14 @@ int set_udp_socket(const char *application_ip, const char *src_port, const char*
         exit(1);
     }
 
+    //Set don't fragment
     int dont_fragment = IP_PMTUDISC_DO;
     if(setsockopt(udp_socket, IPPROTO_IP, IP_MTU_DISCOVER, &dont_fragment, sizeof(dont_fragment)) < 0){
         fprintf(stderr, "UDP don't fragment error %s\n", strerror(errno));
         exit(1);
     }
 
+    //Set time to live
     int ttl = config->udp_ttl;
     int set_ttl = setsockopt(udp_socket, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl));
     if(set_ttl < 0){
@@ -289,6 +378,16 @@ int set_udp_socket(const char *application_ip, const char *src_port, const char*
     return udp_socket;
 }
 
+/*
+ * Function: send_udp_train
+ * ---------------------------
+ * Send UDP packet train given size from configuration
+ *
+ * upd_socket:   Head rst received time stamp 
+ * end:     Sequence number used to identify the probe
+ * 
+ * returns: Time interval between 2 rst packets of a train
+ */
 void send_udp_train(int udp_socket, struct addrinfo *server_info, int entropy_type, Config *config){
     char buffer[config->packet_size];
     int packet_id;
@@ -316,10 +415,8 @@ void send_udp_train(int udp_socket, struct addrinfo *server_info, int entropy_ty
                     packet_sent += 1;
                 }
 
-                //printf("Sent low-entropy packet id: %d\n", i);
             }
 
-            //syslog(LOG_INFO, "Low entropy packet sent: %d\n", packet_sent);
 
             break;
 
@@ -367,8 +464,6 @@ void send_udp_train(int udp_socket, struct addrinfo *server_info, int entropy_ty
                 
             }
 
-            //syslog(LOG_INFO, "High entropy packet sent: %d\n", packet_sent);
-
             close(urandom_fd);
 
             break;
@@ -379,9 +474,20 @@ void send_udp_train(int udp_socket, struct addrinfo *server_info, int entropy_ty
     }
 }
 
+/*
+ * Function: capture_rst_pkt
+ * ---------------------------
+ * Capture rst packet from destination
+ *
+ * socket:   TCP raw socket
+ * timestamp:     Time stamp struct for recording time when rst packet captured
+ * expected_ip_from_dest: Expected ip from destination
+ * expected_port_from_dest: Expected port from destination
+ * 
+ * returns: 1 as success capture and 0 for timeout
+ */
 int capture_rst_pkt(int socket, struct timeval *timestamp, uint32_t expected_ip_from_dest, uint16_t expected_port_from_dest){
 
-    //syslog(LOG_INFO, "Capturing RST pkt\n");
 
     struct timeval start, now;//Recording timestamps for start time and current time
     gettimeofday(&start, NULL);//Record start time
@@ -413,6 +519,8 @@ int capture_rst_pkt(int socket, struct timeval *timestamp, uint32_t expected_ip_
         char buffer[4096];
         struct sockaddr_storage addr;
         socklen_t addrlen = sizeof(addr);
+
+        //Receive rst packet
         ssize_t recv_len = recvfrom(socket, buffer, sizeof(buffer), 0, (struct sockaddr*)&addr, &addrlen); //Capture any possible packet
         if (recv_len <= 0) {
             continue;
@@ -422,13 +530,13 @@ int capture_rst_pkt(int socket, struct timeval *timestamp, uint32_t expected_ip_
         int ip_header_len = iph->ip_hl * 4;
         struct tcphdr *tcph = (struct tcphdr *)(buffer + ip_header_len);
 
-        //Check iff 
+        //Check iff flag is rst and dest ip+port is correct
         if ((tcph->th_flags & TH_RST) &&
             iph->ip_src.s_addr == expected_ip_from_dest &&
             tcph->dest == expected_port_from_dest) {
 
             gettimeofday(timestamp, NULL);
-            return 1;  // ✅ Valid RST from expected source
+            return 1;
         }
     }
 
@@ -437,12 +545,22 @@ int capture_rst_pkt(int socket, struct timeval *timestamp, uint32_t expected_ip_
     
 }
 
+/*
+ * Function: capture_thread_function
+ * ---------------------------
+ * Function for capturing rst packet in multit hreading
+ *
+ * *p: Void pointer to pass argument struct
+ * 
+ * returns: None but should run in concurrency
+ */
 void *capture_thread_function(void *p){
     syslog(LOG_INFO, "Capturing 1st set of rst...\n");
-    MultithreadingArgs *args = (MultithreadingArgs*)p;
+    MultithreadingArgs *args = (MultithreadingArgs*)p; //Set structs for arguments
 
     int tcp_raw_socket = args->tcp_raw_socket;
 
+    //Lock and unlock to signal send thread function to go on. Procedure for low entropu train
     pthread_mutex_lock(&lock);
     ready = 1;
     pthread_cond_signal(&cond);
@@ -452,6 +570,7 @@ void *capture_thread_function(void *p){
 
     int rst2 = capture_rst_pkt(args->tcp_raw_socket, args->low_rst2_time, args->dest_addr.sin_addr.s_addr, args->src_addr.sin_port);
 
+    //Check if rst1 and rst2 actually captured rst packet
     if(!rst1 | !rst2){
         syslog(LOG_PERROR, "Captured non rst pkt or timed out");
         printf("Failed to detect due to insufficient information.\n");
@@ -459,8 +578,9 @@ void *capture_thread_function(void *p){
     }
 
     syslog(LOG_INFO, "Waiting for inter-measure time...\n");
-    sleep(args->config->inter_time);
+    sleep(args->config->inter_time); //Inter-measure time set by config
 
+    //Procedure for high entropy train
     syslog(LOG_INFO, "Capturing 2nd set of rst...\n");
     pthread_mutex_lock(&lock);
     ready = 2;
@@ -479,9 +599,19 @@ void *capture_thread_function(void *p){
 
 }
 
+/*
+ * Function: send_thread_function
+ * ---------------------------
+ * Send head SYN TCP packet, send UDP train, then send Tail SYN when done UDP train
+ *
+ * *p: Void pointer to pass argument struct
+ * 
+ * returns: None but should run concurrently
+ */
 void *send_thread_function(void *p){
-    MultithreadingArgs *args = (MultithreadingArgs*)p;
+    MultithreadingArgs *args = (MultithreadingArgs*)p; //Set Struct for arguments
 
+    //Wait and proceed after recv function being called for low UDP train
     pthread_mutex_lock(&lock);
     while(ready < 1){
         pthread_cond_wait(&cond, &lock);
@@ -491,7 +621,8 @@ void *send_thread_function(void *p){
     send_syn_pkt(args->tcp_raw_socket, &(args->src_addr), &(args->dest_addr), args->port_x);
     send_udp_train(args->udp_socket, args->udp_res, 0, args->config);
     send_syn_pkt(args->tcp_raw_socket, &(args->src_addr), &(args->dest_addr), args->port_y);
-
+    
+    //Wait and proceed after recv function being called for high UDP train
     pthread_mutex_lock(&lock);
     while(ready < 2){
         pthread_cond_wait(&cond, &lock);
@@ -502,6 +633,7 @@ void *send_thread_function(void *p){
     send_udp_train(args->udp_socket, args->udp_res, 1, args->config);
     send_syn_pkt(args->tcp_raw_socket, &(args->src_addr), &(args->dest_addr), args->port_y);
 }
+
 
 int main(int argc, char* argv[]){
 
