@@ -1,4 +1,4 @@
-# Gin Admin Theme
+# End-to-End Detection of Network Compression
 
 ## Contents of this file
 
@@ -76,7 +76,21 @@ In eth1, you see inet parameter starts with `192.168.xxx.xxx`, That is the IPv4 
 
 ## Part 1
 
+- Boot up client and server's terminal, assume you filled out required `myconfig.JSON` on both machines
 
+- In client, enter `gcc compdetect_client.c -o compdetect_client`
+
+- In server, enter `gcc compdetect_server.c -o compdetect_server`
+
+- In wireshark, click on interface to be captured as the network interface that has inet IPv4 appeared on `ifconfig`. Set capture filter `host 192.168.xxx.xxx and 192.168.xxx.xxx and (tcp or udp)`. 2 hosts are source and destination IP address. You can choose to whether also capture on server, but client is a must.
+
+- You will see both object or exe files of corresponding name appearing
+
+- Enter `./compdetect_server 7777` on server terminal and press enter to run. 7777 means you set your server's TCP pre probing phase port number
+
+- After your server starts running, enter `./compdetect_client myconfig.JSON`
+
+- Now both client and server will start communicating and wait until client shows either `Compression detected!` or `Compression not detected!`
 
 ## Maintainers
 
