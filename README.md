@@ -44,14 +44,23 @@ You need CJson libarary installed and C compiler newer or atleast C11. You also 
 
 - install CJSON for parsing your configuration on Ubuntu/Debian OS\
 `sudo apt-get install libcjson-dev`\
-Make sure it is on /usr/include/cJSON/cJSON.h so you can do #include<cjson/cJSON>
+Make sure it is on /usr/include/cJSON/cJSON.h so you can do `#include<cjson/cJSON>`
 
 
-### Set Gin as default admin theme
+### Configuration
 
- - Navigate to Admin > Appearance
- - On the same page, click "Install" under Gin
- - At the bottom of the page, switch the Administration theme to Gin
+ - `src_ip` is the source/client IP in IPv4
+ - `dest_ip` is destination/server IP in IPv4
+ - `udp_src_port` is UDP source/client port (Default: 9876)
+ - `udp_dest_port` is UDP destination/server Port (Default: 8765)
+ - `tcp_head_syn_dest_port` is TCP syn head port (Only for part 2, Default: 9999)
+ - `tcp_tail_syn_dest_port` is TCP syn head port (Only for part 2, Default: 8888)
+ - `tcp_port_pre_probe` is TCP pre probe port (Only for part 1, Default: 7777)
+ - `tcp_port_post_probe` is TCP post probe port (Only for part 1, Default: 6666)
+ - `packet_size` is size of payload in each UDP packet (Default: 1000)
+ - `inter_time` is inter-measurement time between sending low and high UDP entropy train
+ - `packet_count` is total packet count to be sent in UDP train
+ - `udp_ttl` is time to live for UDP (Only for part 2, Default: 255)
 
 ## Troubleshooting
 
