@@ -115,6 +115,10 @@ Right after that last UDP packet, you will see TCP SYN packet sent and receives 
 
 - Sanity check: Look both starting packets and end packets. Look at payload data in wireshark, if there is `0x0000` and `0x176f` on both train, then it is all good.
 
+## miscellaneous
+
+- You can disable logger printing on terminal by commenting out `openlog()` on main functions of each program.
+
 ## Maintainers
 
 Current maintainers:
