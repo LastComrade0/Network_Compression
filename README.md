@@ -1,5 +1,7 @@
 # End-to-End Detection of Network Compression
 
+## Author: Jerry Chen
+
 ## Contents of this file
 
  - Introduction
