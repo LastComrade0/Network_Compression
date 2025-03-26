@@ -6,6 +6,7 @@
  - Requirements
  - Installation
  - Configuration
+ - Preparation
  - Part 1 - Client - Server Program
  - Part 2 - Standalone Application
  - Troubleshooting
@@ -49,6 +50,7 @@ Make sure it is on /usr/include/cJSON/cJSON.h so you can do `#include<cjson/cJSO
 
 ### Configuration
 
+These are configuration parameters set in `myconfig.JSON`
  - `src_ip` is the source/client IP in IPv4
  - `dest_ip` is destination/server IP in IPv4
  - `udp_src_port` is UDP source/client port (Default: 9876)
@@ -62,16 +64,19 @@ Make sure it is on /usr/include/cJSON/cJSON.h so you can do `#include<cjson/cJSO
  - `packet_count` is total packet count to be sent in UDP train
  - `udp_ttl` is time to live for UDP (Only for part 2, Default: 255)
 
-## Troubleshooting
+## Peparation
 
-- Setup Gin locally that you can compile CSS & JS files.\
-`nvm use && npm i`
+Type `ifconfig` in Linux terminal, you will see such:
 
-- Run dev env with watcher and debug output (development process)\
-`npm run dev`
+- eth0: flags...\
+- eth1: flags... inet 192.168.xxx.xxx
+- eth3: flags...
 
-- Compile assets\
-`npm run build`
+In eth1, you see inet parameter starts with `192.168.xxx.xxx`, That is the IPv4 you will need to fill on configuration file depending on you role(server/client)
+
+## Part 1
+
+
 
 ## Maintainers
 
