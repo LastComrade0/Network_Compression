@@ -76,7 +76,7 @@ Type `ifconfig` in Linux terminal, you will see such:
 
 In eth1, you see inet parameter starts with `192.168.xxx.xxx`, That is the IPv4 you will need to fill on configuration file depending on you role(server/client)
 
-## Part 1
+## Part 1 Client-Server Program
 
 - Boot up client and server's terminal, assume you filled out required `myconfig.JSON` on both machines
 
@@ -100,7 +100,7 @@ In eth1, you see inet parameter starts with `192.168.xxx.xxx`, That is the IPv4 
 
 - Note: It is expected to have some packet loss on server side which wireshark may have only 5500-6000 arrive especially on low entropy packet train. But there should not be mis-captured packets on client as sending side.
 
-## Part 2
+## Part 2 Standalone Application
 
 - Only boot up client terminal(For ease not to change `src` field on `myconfig`)
 
